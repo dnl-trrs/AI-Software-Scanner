@@ -1,21 +1,141 @@
 {
   "name": "ai-software-scanner",
-  "displayName": "AI Software Scanner",
-  "description": "AI-powered software scanner for VS Code",
-  "version": "0.0.1",
+  "displayName": "AI Software Security Scanner",
+  "description": "AI-powered security scanner with automated fix suggestions and educational content",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.74.0"
   },
-  "categories": ["Other"],
-  "activationEvents": [],
+  "publisher": "dnl-trrs",
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Education",
+    "Other"
+  ],
+  "keywords": [
+    "security",
+    "vulnerability",
+    "scanner",
+    "AI",
+    "automated-fixes",
+    "code-quality",
+    "OWASP",
+    "secure-coding"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "ai-software-scanner.helloWorld",
-        "title": "Hello World"
+        "command": "ai-software-scanner.scanFile",
+        "title": "Scan Current File for Security Issues",
+        "category": "AI Security",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "ai-software-scanner.scanWorkspace",
+        "title": "Scan Entire Workspace",
+        "category": "AI Security",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ai-software-scanner.showSecurityPanel",
+        "title": "Show Security Panel",
+        "category": "AI Security",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "ai-software-scanner.applyFix",
+        "title": "Apply Security Fix",
+        "category": "AI Security"
+      },
+      {
+        "command": "ai-software-scanner.showEducation",
+        "title": "Show Security Education",
+        "category": "AI Security"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ai-software-scanner.scanFile",
+          "group": "1_modification",
+          "when": "resourceExtname =~ /\\.(js|ts|jsx|tsx|py|java|go|rb|php|cs|cpp|c)$/"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "ai-software-scanner.scanFile",
+          "group": "navigation",
+          "when": "resourceExtname =~ /\\.(js|ts|jsx|tsx|py|java|go|rb|php|cs|cpp|c)$/"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ai-software-scanner.scanFile",
+          "group": "2_workspace",
+          "when": "resourceExtname =~ /\\.(js|ts|jsx|tsx|py|java|go|rb|php|cs|cpp|c)$/"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ai-software-scanner.scanFile",
+        "key": "shift+alt+s",
+        "mac": "shift+cmd+s",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ai-software-scanner.showSecurityPanel",
+        "key": "shift+alt+p",
+        "mac": "shift+cmd+p"
+      }
+    ],
+    "configuration": {
+      "title": "AI Security Scanner",
+      "properties": {
+        "aiSecurityScanner.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the AI Security Scanner"
+        },
+        "aiSecurityScanner.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan files when saved"
+        },
+        "aiSecurityScanner.scanOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically scan files when opened"
+        },
+        "aiSecurityScanner.severityLevel": {
+          "type": "string",
+          "default": "medium",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Minimum severity level to report"
+        },
+        "aiSecurityScanner.enableEducationalContent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show educational content with vulnerabilities (our key differentiator)"
+        },
+        "aiSecurityScanner.enableAutomaticFixes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic fix suggestions (competitive advantage over Snyk AI)"
+        },
+        "aiSecurityScanner.aiProvider": {
+          "type": "string",
+          "default": "local",
+          "enum": ["local", "openai", "claude"],
+          "description": "AI provider for enhanced recommendations"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
