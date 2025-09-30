@@ -1,6 +1,6 @@
 # AI Software Scanner
 
-AI-powered software scanner extension for Visual Studio Code.
+AI-powered software scanner extension for Visual Studio Code. 
 
 ## Features
 
