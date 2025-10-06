@@ -16,12 +16,17 @@ import SecurityScanner from './scanner/SecurityScanner';
 import AIRecommendationEngine from './ai/AIRecommendationEngine';
 import { SecurityPanelProvider } from './ui/SecurityPanel';
 import { Vulnerability } from './scanner/SecurityScanner';
+import { SidebarProvider } from './ui/SidebarProvider';
+import { RecommendationDecorator, Recommendation } from './ui/RecommendationDecorator';
+import { RecommendationPanel } from './ui/RecommendationPanel';
 
 let scanner: SecurityScanner;
 let aiEngine: AIRecommendationEngine;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
+let sidebarProvider: SidebarProvider;
+let recommendationDecorator: RecommendationDecorator;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('🔒 AI Software Security Scanner is now active!');
@@ -31,13 +36,23 @@ export function activate(context: vscode.ExtensionContext) {
     aiEngine = new AIRecommendationEngine();
     diagnosticCollection = vscode.languages.createDiagnosticCollection('security');
     outputChannel = vscode.window.createOutputChannel('Security Scanner');
+    recommendationDecorator = new RecommendationDecorator();
     
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = '$(shield) Security';
-    statusBarItem.tooltip = 'AI Software Security Scanner';
-    statusBarItem.command = 'ai-software-scanner.showSecurityPanel';
+    statusBarItem.tooltip = 'AI Software Security Scanner - Click to demo UI';
+    statusBarItem.command = 'ai-software-scanner.demoUI';
     statusBarItem.show();
+
+    // Register sidebar provider
+    sidebarProvider = new SidebarProvider(context.extensionUri, context);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            SidebarProvider.viewType,
+            sidebarProvider
+        )
+    );
 
     // Register commands
     const scanFileCommand = vscode.commands.registerCommand('ai-software-scanner.scanFile', async () => {
@@ -58,6 +73,35 @@ export function activate(context: vscode.ExtensionContext) {
 
     const showEducationalContentCommand = vscode.commands.registerCommand('ai-software-scanner.showEducation', (content: string) => {
         showEducationalContent(content);
+    });
+
+    // New UI Commands
+    const showRecommendationsCommand = vscode.commands.registerCommand('ai-software-scanner.showRecommendations', () => {
+        vscode.window.showInformationMessage('Showing all recommendations...');
+        // This would open a full recommendations view
+    });
+
+    const manageSubscriptionCommand = vscode.commands.registerCommand('ai-software-scanner.manageSubscription', () => {
+        vscode.window.showInformationMessage('Opening subscription management...');
+        // This would open subscription settings
+    });
+
+    const acceptRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.acceptRecommendation', async (data: any) => {
+        vscode.window.showInformationMessage(`Accepting recommendation for line ${data.line}`);
+        // Apply the fix here
+    });
+
+    const declineRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.declineRecommendation', (data: any) => {
+        vscode.window.showInformationMessage(`Declined recommendation for line ${data.line}`);
+    });
+
+    const learnMoreCommand = vscode.commands.registerCommand('ai-software-scanner.learnMore', (type: string) => {
+        showEducationalContent(`<h3>${type}</h3><p>Educational content about this security issue would appear here...</p>`);
+    });
+
+    // Demo command to show the UI
+    const demoUICommand = vscode.commands.registerCommand('ai-software-scanner.demoUI', () => {
+        showDemoRecommendations();
     });
 
     // Register code actions provider for quick fixes
@@ -90,12 +134,19 @@ export function activate(context: vscode.ExtensionContext) {
         showPanelCommand,
         applyFixCommand,
         showEducationalContentCommand,
+        showRecommendationsCommand,
+        manageSubscriptionCommand,
+        acceptRecommendationCommand,
+        declineRecommendationCommand,
+        learnMoreCommand,
+        demoUICommand,
         codeActionProvider,
         diagnosticCollection,
         statusBarItem,
         outputChannel,
         onSaveListener,
-        onOpenListener
+        onOpenListener,
+        recommendationDecorator
     );
 
     // Show welcome message with key features
@@ -417,6 +468,83 @@ function showEducationalContent(content: string) {
 function shouldScanDocument(document: vscode.TextDocument): boolean {
     const supportedLanguages = ['javascript', 'typescript', 'python', 'java', 'go', 'ruby', 'php', 'csharp', 'cpp', 'c'];
     return supportedLanguages.includes(document.languageId);
+}
+
+/**
+ * Demo function to show the UI with sample recommendations
+ */
+function showDemoRecommendations() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage('Please open a file to see demo recommendations');
+        return;
+    }
+
+    // Sample recommendations matching your Figma mockup
+    const demoRecommendations: Recommendation[] = [
+        {
+            line: 61,
+            column: 20,
+            endLine: 61,
+            endColumn: 90,
+            severity: 'medium',
+            type: 'ExpDistribution',
+            message: 'Potential security vulnerability detected in probability distribution',
+            suggestion: 'Consider using a more secure random number generation method'
+        },
+        {
+            line: 62,
+            column: 20,
+            endLine: 62,
+            endColumn: 75,
+            severity: 'high',
+            type: 'InsecureRandomValue',
+            message: 'Using predictable random values can lead to security vulnerabilities',
+            suggestion: 'Use cryptographically secure random number generation'
+        }
+    ];
+
+    // Apply decorations to show inline recommendations
+    recommendationDecorator.setRecommendations(
+        editor.document.uri.toString(),
+        demoRecommendations
+    );
+
+    // Update sidebar count
+    sidebarProvider.updateRecommendations(demoRecommendations.length);
+
+    // Show a sample recommendation panel after a short delay
+    setTimeout(() => {
+        const sampleRecommendation = {
+            line: 61,
+            column: 20,
+            severity: 'medium',
+            type: 'ExpDistribution Security Issue',
+            message: 'Potential security vulnerability in probability distribution',
+            suggestion: 'Use secure random generation with proper entropy sources',
+            currentCode: 'ExpDistribution(mean: fields["mean-duration"].toDouble()),\nExpDistribution(mean: fields["mean-interarrival-time"].toDouble()),',
+            fixedCode: 'SecureExpDistribution(mean: fields["mean-duration"].toDouble(), entropy: SecureRandom()),\nSecureExpDistribution(mean: fields["mean-interarrival-time"].toDouble(), entropy: SecureRandom()),',
+            explanation: 'Using predictable random distributions can make your application vulnerable to timing attacks and prediction exploits. By using cryptographically secure random sources, you ensure that attackers cannot predict or manipulate the distribution outcomes.'
+        };
+
+        RecommendationPanel.createOrShow(vscode.Uri.file(editor.document.fileName), sampleRecommendation);
+    }, 1000);
+
+    vscode.window.showInformationMessage(
+        '🎨 Demo UI loaded! Check the sidebar and code decorations.',
+        'View Details'
+    ).then(selection => {
+        if (selection === 'View Details') {
+            outputChannel.appendLine('\n=== Demo Recommendations ===');
+            outputChannel.appendLine(`Found ${demoRecommendations.length} security issues`);
+            demoRecommendations.forEach((rec, i) => {
+                outputChannel.appendLine(`\n${i + 1}. [${rec.severity.toUpperCase()}] ${rec.type}`);
+                outputChannel.appendLine(`   Line ${rec.line}: ${rec.message}`);
+                outputChannel.appendLine(`   Fix: ${rec.suggestion}`);
+            });
+            outputChannel.show();
+        }
+    });
 }
 
 /**
