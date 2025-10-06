@@ -6,8 +6,29 @@
         "lib": [
             "ES2022"
         ],
+        "types": ["node", "jest"],
         "sourceMap": true,
         "rootDir": "src",
-        "strict": true
-    }
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "declaration": true,
+        "declarationMap": true,
+        "incremental": true,
+        "resolveJsonModule": true,
+        "moduleResolution": "Node16",
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "exactOptionalPropertyTypes": true
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "out",
+        "**/*.test.ts"
+    ]
 }

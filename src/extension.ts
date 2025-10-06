@@ -38,6 +38,9 @@ export function activate(context: vscode.ExtensionContext) {
             // 2. Get back security recommendations
             // 3. Display results to user
             
+            // Placeholder: Log the text length for now
+            console.log(`Scanning ${text.length} characters of code`);
+            
             // For now, we'll create a diagnostic collection to show issues
             const diagnostics = vscode.languages.createDiagnosticCollection('security-scan');
             
