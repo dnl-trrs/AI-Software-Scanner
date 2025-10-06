@@ -20,6 +20,42 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(disposable);
+
+    // Register the scan command
+    let scanDisposable = vscode.commands.registerCommand('ai-software-scanner.scanFile', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showWarningMessage('No file is open to scan');
+            return;
+        }
+
+        const document = editor.document;
+        const text = document.getText();
+
+        try {
+            // Here you would:
+            // 1. Send the code to your AI model for analysis
+            // 2. Get back security recommendations
+            // 3. Display results to user
+            
+            // For now, we'll create a diagnostic collection to show issues
+            const diagnostics = vscode.languages.createDiagnosticCollection('security-scan');
+            
+            // Example diagnostic (you would generate these from AI results)
+            const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(0, 0, 0, 10),
+                'Example security issue found',
+                vscode.DiagnosticSeverity.Warning
+            );
+            
+            diagnostics.set(document.uri, [diagnostic]);
+            
+        } catch (error) {
+            vscode.window.showErrorMessage('Error scanning file: ' + error);
+        }
+    });
+
+    context.subscriptions.push(scanDisposable);
 }
 
 // This method is called when your extension is deactivated

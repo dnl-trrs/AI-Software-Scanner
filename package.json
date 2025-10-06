@@ -12,10 +12,20 @@
   "contributes": {
     "commands": [
       {
-        "command": "ai-software-scanner.helloWorld",
-        "title": "Hello World"
+        "command": "ai-software-scanner.scanFile",
+        "title": "Scan File for Security Issues"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "AI Software Scanner",
+      "properties": {
+        "aiSoftwareScanner.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for AI service"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -35,6 +45,10 @@
     "typescript": "^5.5.4",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1"
+  },
+  "dependencies": {
+    "openai": "^4.0.0",
+    "node-fetch": "^2.6.1"
   },
   "repository": {
     "type": "git",
