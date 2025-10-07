@@ -4,7 +4,22 @@
         {
             "type": "npm",
             "script": "watch",
-            "problemMatcher": "$tsc-watch",
+            "problemMatcher": {
+                "owner": "webpack",
+                "pattern": {
+                    "regexp": "^(.*):(\\\\d+):(\\\\d+)\\\\s+(warning|error)\\\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*webpack.*Compiler starting.*$",
+                    "endsPattern": "^.*webpack.*compiled.*$"
+                }
+            },
             "isBackground": true,
             "presentation": {
                 "reveal": "never"
