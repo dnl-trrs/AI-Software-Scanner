@@ -33,9 +33,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case 'viewRecommendations':
                     vscode.commands.executeCommand('ai-software-scanner.showRecommendations');
                     break;
-                case 'manageSubscription':
-                    vscode.commands.executeCommand('ai-software-scanner.manageSubscription');
-                    break;
             }
         });
     }
@@ -45,6 +42,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this._view.webview.postMessage({ 
                 type: 'updateCount', 
                 value: count 
+            });
+        }
+    }
+
+    public updateStats(stats: { recommendationsCount: number; issuesFixed: number; filesScanned: number; lastScan?: string }) {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                type: 'updateStats', 
+                stats: stats 
+            });
+        }
+    }
+
+    public showScanResults(results: any) {
+        if (this._view) {
+            this._view.webview.postMessage({ 
+                type: 'scanResults', 
+                results: results 
             });
         }
     }
@@ -94,23 +109,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     
                     .action-button {
                         width: 100%;
-                        padding: 10px 16px;
+                        padding: 12px 24px;
                         margin-bottom: 12px;
                         background: var(--vscode-button-background);
                         color: var(--vscode-button-foreground);
                         border: none;
-                        border-radius: 2px;
+                        border-radius: 20px;
                         cursor: pointer;
                         font-size: 13px;
                         font-family: var(--vscode-font-family);
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        transition: background-color 0.2s;
+                        transition: all 0.2s ease;
+                        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                     }
                     
                     .action-button:hover {
                         background: var(--vscode-button-hoverBackground);
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
                     }
                     
                     .action-button.primary {
@@ -155,47 +173,95 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
                     
                     .recommendations-info {
-                        padding: 20px;
+                        padding: 16px 20px;
                         background: var(--vscode-editor-background);
                         margin: 0 20px 20px;
-                        border-radius: 4px;
+                        border-radius: 8px;
                         border-left: 3px solid #007ACC;
-                    }
-                    
-                    .recommendations-count {
-                        font-size: 24px;
-                        font-weight: bold;
-                        color: var(--vscode-foreground);
-                        margin-bottom: 4px;
-                    }
-                    
-                    .recommendations-label {
-                        font-size: 12px;
-                        color: var(--vscode-descriptionForeground);
-                    }
-                    
-                    .divider {
-                        height: 1px;
-                        background: var(--vscode-widget-border);
-                        margin: 20px 0;
-                    }
-                    
-                    .subscription-status {
-                        padding: 12px 20px;
-                        font-size: 11px;
-                        color: var(--vscode-descriptionForeground);
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
                     }
                     
-                    .status-badge {
-                        padding: 2px 8px;
-                        background: var(--vscode-badge-background);
-                        color: var(--vscode-badge-foreground);
-                        border-radius: 10px;
-                        font-size: 10px;
+                    .recommendations-count {
+                        font-size: 28px;
+                        font-weight: bold;
+                        color: var(--vscode-foreground);
                     }
+                    
+                    .recommendations-label {
+                        font-size: 13px;
+                        color: var(--vscode-descriptionForeground);
+                        margin-left: 12px;
+                    }
+                    
+                    .stats-section {
+                        padding: 16px 20px;
+                        border-top: 1px solid var(--vscode-widget-border);
+                    }
+                    
+                    .stats-item {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 8px 0;
+                        font-size: 12px;
+                    }
+                    
+                    .stats-label {
+                        color: var(--vscode-descriptionForeground);
+                    }
+                    
+                    .stats-value {
+                        font-weight: 600;
+                        color: var(--vscode-foreground);
+                    }
+                    
+                    .scan-results {
+                        padding: 16px 20px;
+                        background: var(--vscode-editor-background);
+                        margin: 16px;
+                        border-radius: 6px;
+                        border: 1px solid var(--vscode-widget-border);
+                        max-height: 200px;
+                        overflow-y: auto;
+                        display: none;
+                    }
+                    
+                    .scan-results.active {
+                        display: block;
+                    }
+                    
+                    .scan-results-title {
+                        font-size: 13px;
+                        font-weight: 600;
+                        margin-bottom: 12px;
+                        color: var(--vscode-foreground);
+                    }
+                    
+                    .scan-item {
+                        padding: 6px 0;
+                        font-size: 12px;
+                        color: var(--vscode-descriptionForeground);
+                        border-bottom: 1px solid var(--vscode-widget-border);
+                    }
+                    
+                    .scan-item:last-child {
+                        border-bottom: none;
+                    }
+                    
+                    .severity-indicator {
+                        display: inline-block;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        margin-right: 6px;
+                    }
+                    
+                    .severity-critical { background: #ff0000; }
+                    .severity-high { background: #ff8800; }
+                    .severity-medium { background: #ffcc00; }
+                    .severity-low { background: #0099ff; }
                 </style>
             </head>
             <body>
@@ -205,8 +271,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 </div>
                 
                 <div class="recommendations-info">
-                    <div class="recommendations-count" id="recommendationsCount">0</div>
-                    <div class="recommendations-label">All Recommendations</div>
+                    <div style="display: flex; align-items: baseline;">
+                        <div class="recommendations-count" id="recommendationsCount">0</div>
+                        <div class="recommendations-label">Recommendations Found</div>
+                    </div>
                 </div>
                 
                 <div class="actions">
@@ -224,20 +292,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     
                     <button class="action-button" id="viewRecommendations">
                         <span class="icon">📋</span>
-                        View Recommendations
-                    </button>
-                    
-                    <button class="action-button" id="manageSubscription">
-                        <span class="icon">⚙️</span>
-                        Manage Subscription
+                        View All Recommendations
                     </button>
                 </div>
                 
-                <div class="divider"></div>
+                <div class="stats-section">
+                    <div class="stats-item">
+                        <span class="stats-label">Last Scan</span>
+                        <span class="stats-value" id="lastScan">Not yet scanned</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Files Scanned</span>
+                        <span class="stats-value" id="filesScanned">0</span>
+                    </div>
+                    <div class="stats-item">
+                        <span class="stats-label">Issues Fixed</span>
+                        <span class="stats-value" id="issuesFixed">0</span>
+                    </div>
+                </div>
                 
-                <div class="subscription-status">
-                    <span>Subscription Status</span>
-                    <span class="status-badge">FREE TRIAL</span>
+                <div class="scan-results" id="scanResults">
+                    <div class="scan-results-title">Scan Results</div>
+                    <div id="scanResultsList"></div>
                 </div>
                 
                 <script>
@@ -270,16 +346,37 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         vscode.postMessage({ type: 'viewRecommendations' });
                     });
                     
-                    document.getElementById('manageSubscription').addEventListener('click', () => {
-                        vscode.postMessage({ type: 'manageSubscription' });
-                    });
-                    
                     // Handle messages from extension
                     window.addEventListener('message', event => {
                         const message = event.data;
                         switch (message.type) {
                             case 'updateCount':
                                 document.getElementById('recommendationsCount').textContent = message.value;
+                                break;
+                            case 'updateStats':
+                                if (message.stats) {
+                                    document.getElementById('recommendationsCount').textContent = message.stats.recommendationsCount;
+                                    document.getElementById('filesScanned').textContent = message.stats.filesScanned;
+                                    document.getElementById('issuesFixed').textContent = message.stats.issuesFixed;
+                                    if (message.stats.lastScan) {
+                                        document.getElementById('lastScan').textContent = message.stats.lastScan;
+                                    }
+                                }
+                                break;
+                            case 'scanResults':
+                                const resultsDiv = document.getElementById('scanResults');
+                                const resultsList = document.getElementById('scanResultsList');
+                                if (message.results && message.results.length > 0) {
+                                    resultsList.innerHTML = message.results.map(item => 
+                                        '<div class="scan-item">' +
+                                            '<span class="severity-indicator severity-' + item.severity + '"></span>' +
+                                            '<strong>' + item.type + ':</strong> Line ' + item.line + ' - ' + item.message +
+                                        '</div>'
+                                    ).join('');
+                                    resultsDiv.classList.add('active');
+                                } else {
+                                    resultsDiv.classList.remove('active');
+                                }
                                 break;
                         }
                     });

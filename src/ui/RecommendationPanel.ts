@@ -6,16 +6,23 @@ export class RecommendationPanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
+    private _recommendations: any[] = [];
+    private _currentIndex: number = 0;
 
-    public static createOrShow(extensionUri: vscode.Uri, recommendation: any) {
+    public static createOrShow(extensionUri: vscode.Uri, recommendations: any[] | any) {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
+        // Convert single recommendation to array if needed
+        const recsArray = Array.isArray(recommendations) ? recommendations : [recommendations];
+
         // If we already have a panel, show it
         if (RecommendationPanel.currentPanel) {
             RecommendationPanel.currentPanel._panel.reveal(column);
-            RecommendationPanel.currentPanel._update(recommendation);
+            RecommendationPanel.currentPanel._recommendations = recsArray;
+            RecommendationPanel.currentPanel._currentIndex = 0;
+            RecommendationPanel.currentPanel._update();
             return;
         }
 
@@ -30,15 +37,17 @@ export class RecommendationPanel {
             }
         );
 
-        RecommendationPanel.currentPanel = new RecommendationPanel(panel, extensionUri, recommendation);
+        RecommendationPanel.currentPanel = new RecommendationPanel(panel, extensionUri, recsArray);
     }
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, recommendation: any) {
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, recommendations: any[]) {
         this._panel = panel;
         this._extensionUri = extensionUri;
+        this._recommendations = recommendations;
+        this._currentIndex = 0;
 
         // Set the webview's initial html content
-        this._update(recommendation);
+        this._update();
 
         // Listen for when the panel is disposed
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -49,16 +58,40 @@ export class RecommendationPanel {
                 switch (message.command) {
                     case 'accept':
                         vscode.commands.executeCommand('ai-software-scanner.acceptRecommendation', message.data);
-                        vscode.window.showInformationMessage('Recommendation accepted and applied!');
-                        this._panel.dispose();
+                        // Move to next recommendation or close if last
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        } else {
+                            vscode.window.setStatusBarMessage(`✅ All ${this._recommendations.length} recommendations reviewed!`, 3000);
+                            this._panel.dispose();
+                        }
                         break;
                     case 'decline':
                         vscode.commands.executeCommand('ai-software-scanner.declineRecommendation', message.data);
-                        vscode.window.showInformationMessage('Recommendation declined');
-                        this._panel.dispose();
+                        // Move to next recommendation or close if last
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        } else {
+                            vscode.window.setStatusBarMessage(`✅ All ${this._recommendations.length} recommendations reviewed!`, 3000);
+                            this._panel.dispose();
+                        }
                         break;
                     case 'learnMore':
                         vscode.commands.executeCommand('ai-software-scanner.showEducation', message.data);
+                        break;
+                    case 'previous':
+                        if (this._currentIndex > 0) {
+                            this._currentIndex--;
+                            this._update();
+                        }
+                        break;
+                    case 'next':
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        }
                         break;
                 }
             },
@@ -81,12 +114,17 @@ export class RecommendationPanel {
         }
     }
 
-    private _update(recommendation: any) {
-        this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, recommendation);
+    private _update() {
+        const currentRec = this._recommendations[this._currentIndex];
+        this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, currentRec);
     }
 
     private _getHtmlForWebview(webview: vscode.Webview, recommendation: any) {
         const nonce = this.getNonce();
+        const isFirst = this._currentIndex === 0;
+        const isLast = this._currentIndex === this._recommendations.length - 1;
+        const currentNum = this._currentIndex + 1;
+        const totalNum = this._recommendations.length;
 
         return `<!DOCTYPE html>
             <html lang="en">
@@ -112,10 +150,12 @@ export class RecommendationPanel {
                         background: var(--vscode-editor-background);
                         border: 1px solid var(--vscode-widget-border);
                         border-radius: 8px;
-                        max-width: 600px;
-                        width: 90%;
+                        width: 700px;
+                        height: 800px;
                         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
                         animation: slideIn 0.3s ease-out;
+                        display: flex;
+                        flex-direction: column;
                     }
 
                     @keyframes slideIn {
@@ -135,11 +175,61 @@ export class RecommendationPanel {
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
+                        height: 70px;
+                        position: relative;
                     }
 
                     .modal-title {
                         font-size: 18px;
                         font-weight: 600;
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        flex: 1;
+                    }
+                    
+                    .navigation-controls {
+                        display: flex;
+                        align-items: center;
+                        gap: 16px;
+                    }
+                    
+                    .nav-button {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 50%;
+                        border: 1px solid var(--vscode-widget-border);
+                        background: transparent;
+                        color: var(--vscode-foreground);
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.2s;
+                        font-size: 18px;
+                    }
+                    
+                    .nav-button:hover:not(:disabled) {
+                        background: var(--vscode-button-hoverBackground);
+                        color: var(--vscode-button-foreground);
+                    }
+                    
+                    .nav-button:disabled {
+                        opacity: 0.4;
+                        cursor: not-allowed;
+                    }
+                    
+                    .counter {
+                        font-size: 14px;
+                        color: var(--vscode-descriptionForeground);
+                        font-weight: normal;
+                        padding: 6px 14px;
+                        background: var(--vscode-badge-background);
+                        border-radius: 12px;
+                        white-space: nowrap;
+                    }
+                    
+                    .nav-group {
                         display: flex;
                         align-items: center;
                         gap: 12px;
@@ -176,10 +266,33 @@ export class RecommendationPanel {
 
                     .modal-body {
                         padding: 24px;
+                        flex: 1;
+                        overflow-y: auto;
+                        display: flex;
+                        flex-direction: column;
                     }
 
                     .section {
                         margin-bottom: 24px;
+                    }
+                    
+                    .section.issue-section {
+                        height: 70px;
+                        overflow: hidden;
+                    }
+                    
+                    .section.code-section {
+                        height: 130px;
+                    }
+                    
+                    .section.recommendation-section {
+                        height: 170px;
+                    }
+                    
+                    .section.explanation-section {
+                        height: 200px;
+                        overflow-y: auto;
+                        padding-right: 8px;
                     }
 
                     .section:last-child {
@@ -191,12 +304,17 @@ export class RecommendationPanel {
                         font-weight: 600;
                         margin-bottom: 8px;
                         color: var(--vscode-foreground);
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
                     }
 
                     .section-content {
                         font-size: 13px;
                         line-height: 1.5;
                         color: var(--vscode-descriptionForeground);
+                        overflow: hidden;
+                        text-overflow: ellipsis;
                     }
 
                     .code-block {
@@ -207,7 +325,8 @@ export class RecommendationPanel {
                         margin: 12px 0;
                         font-family: var(--vscode-editor-font-family);
                         font-size: 12px;
-                        overflow-x: auto;
+                        height: 80px;
+                        overflow: auto;
                     }
 
                     .code-before {
@@ -226,6 +345,8 @@ export class RecommendationPanel {
                         display: flex;
                         justify-content: flex-end;
                         gap: 12px;
+                        flex-shrink: 0;
+                        height: 70px;
                     }
 
                     .button {
@@ -260,13 +381,13 @@ export class RecommendationPanel {
                     .location-info {
                         display: inline-flex;
                         align-items: center;
-                        gap: 8px;
-                        padding: 4px 8px;
+                        gap: 6px;
+                        padding: 3px 8px;
                         background: var(--vscode-badge-background);
                         color: var(--vscode-badge-foreground);
                         border-radius: 4px;
-                        font-size: 11px;
-                        margin-top: 8px;
+                        font-size: 12px;
+                        font-weight: normal;
                     }
 
                     .icon {
@@ -299,28 +420,41 @@ export class RecommendationPanel {
                             <span class="recommendation-icon">💡</span>
                             Recommendation Action
                         </div>
-                        <span class="severity-badge severity-${recommendation.severity || 'medium'}">${recommendation.severity || 'medium'}</span>
+                        <div class="navigation-controls">
+                            <span class="severity-badge severity-${recommendation.severity || 'medium'}">${recommendation.severity || 'medium'}</span>
+                            <div class="nav-group">
+                                <button class="nav-button" id="prevBtn" ${isFirst ? 'disabled' : ''} title="Previous recommendation">
+                                    ‹
+                                </button>
+                                <span class="counter">${currentNum} of ${totalNum}</span>
+                                <button class="nav-button" id="nextBtn" ${isLast ? 'disabled' : ''} title="Next recommendation">
+                                    ›
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="modal-body">
-                        <div class="section">
-                            <div class="section-title">Issue Detected</div>
+                        <div class="section issue-section">
+                            <div class="section-title">
+                                Issue Detected
+                                <span class="location-info">
+                                    📍 Line ${recommendation.line || '1'}, Column ${recommendation.column || '1'}
+                                </span>
+                            </div>
                             <div class="section-content">
                                 ${recommendation.type || 'Security Issue'}: ${recommendation.message || 'Potential security vulnerability detected'}
-                                <div class="location-info">
-                                    📍 Line ${recommendation.line || '1'}, Column ${recommendation.column || '1'}
-                                </div>
                             </div>
                         </div>
 
-                        <div class="section">
+                        <div class="section code-section">
                             <div class="section-title">Current Code</div>
                             <div class="code-block code-before">
                                 <code>${recommendation.currentCode || 'public class HelloWorld {\\n    public static void main(String[] args) {\\n        System.out.println("Hello, World!");\\n    }\\n}'}</code>
                             </div>
                         </div>
 
-                        <div class="section">
+                        <div class="section recommendation-section">
                             <div class="section-title">Recommended Fix</div>
                             <div class="section-content">
                                 ${recommendation.suggestion || 'Apply security best practices to prevent potential vulnerabilities'}
@@ -330,7 +464,7 @@ export class RecommendationPanel {
                             </div>
                         </div>
 
-                        <div class="section">
+                        <div class="section explanation-section">
                             <div class="section-title">Why This Matters</div>
                             <div class="section-content">
                                 ${recommendation.explanation || 'This recommendation helps improve code security and follows industry best practices.'}
@@ -370,6 +504,34 @@ export class RecommendationPanel {
                             command: 'learnMore',
                             data: recommendation.type
                         });
+                    });
+                    
+                    const prevBtn = document.getElementById('prevBtn');
+                    const nextBtn = document.getElementById('nextBtn');
+                    
+                    if (prevBtn) {
+                        prevBtn.addEventListener('click', () => {
+                            if (!prevBtn.disabled) {
+                                vscode.postMessage({ command: 'previous' });
+                            }
+                        });
+                    }
+                    
+                    if (nextBtn) {
+                        nextBtn.addEventListener('click', () => {
+                            if (!nextBtn.disabled) {
+                                vscode.postMessage({ command: 'next' });
+                            }
+                        });
+                    }
+                    
+                    // Add keyboard navigation
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowLeft' && prevBtn && !prevBtn.disabled) {
+                            vscode.postMessage({ command: 'previous' });
+                        } else if (e.key === 'ArrowRight' && nextBtn && !nextBtn.disabled) {
+                            vscode.postMessage({ command: 'next' });
+                        }
                     });
                 </script>
             </body>

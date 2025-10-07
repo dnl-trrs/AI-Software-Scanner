@@ -27,6 +27,9 @@ let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 let sidebarProvider: SidebarProvider;
 let recommendationDecorator: RecommendationDecorator;
+let currentRecommendations: any[] = [];
+let acceptedCount: number = 0;
+let filesScannedCount: number = 0;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('🔒 AI Software Security Scanner is now active!');
@@ -77,22 +80,33 @@ export function activate(context: vscode.ExtensionContext) {
 
     // New UI Commands
     const showRecommendationsCommand = vscode.commands.registerCommand('ai-software-scanner.showRecommendations', () => {
-        vscode.window.showInformationMessage('Showing all recommendations...');
-        // This would open a full recommendations view
-    });
-
-    const manageSubscriptionCommand = vscode.commands.registerCommand('ai-software-scanner.manageSubscription', () => {
-        vscode.window.showInformationMessage('Opening subscription management...');
-        // This would open subscription settings
+        if (currentRecommendations.length > 0) {
+            RecommendationPanel.createOrShow(context.extensionUri, currentRecommendations);
+        } else {
+            vscode.window.setStatusBarMessage('No recommendations available. Run a scan first!', 3000);
+        }
     });
 
     const acceptRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.acceptRecommendation', async (data: any) => {
-        vscode.window.showInformationMessage(`Accepting recommendation for line ${data.line}`);
         // Apply the fix here
+        acceptedCount++;
+        
+        // Update sidebar stats
+        if (sidebarProvider) {
+            sidebarProvider.updateStats({
+                recommendationsCount: currentRecommendations.length - acceptedCount,
+                issuesFixed: acceptedCount,
+                filesScanned: filesScannedCount
+            });
+        }
+        
+        // Show temporary status message instead of notification
+        vscode.window.setStatusBarMessage(`✅ Recommendation applied (${acceptedCount} fixed so far)`, 3000);
     });
 
     const declineRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.declineRecommendation', (data: any) => {
-        vscode.window.showInformationMessage(`Declined recommendation for line ${data.line}`);
+        // Show temporary status message
+        vscode.window.setStatusBarMessage(`Recommendation declined`, 2000);
     });
 
     const learnMoreCommand = vscode.commands.registerCommand('ai-software-scanner.learnMore', (type: string) => {
@@ -135,7 +149,6 @@ export function activate(context: vscode.ExtensionContext) {
         applyFixCommand,
         showEducationalContentCommand,
         showRecommendationsCommand,
-        manageSubscriptionCommand,
         acceptRecommendationCommand,
         declineRecommendationCommand,
         learnMoreCommand,
@@ -149,18 +162,8 @@ export function activate(context: vscode.ExtensionContext) {
         recommendationDecorator
     );
 
-    // Show welcome message with key features
-    vscode.window.showInformationMessage(
-        '🛡️ AI Security Scanner activated! Unlike competitors, we provide actionable fixes and educational content.',
-        'Scan Current File',
-        'View Documentation'
-    ).then(selection => {
-        if (selection === 'Scan Current File') {
-            vscode.commands.executeCommand('ai-software-scanner.scanFile');
-        } else if (selection === 'View Documentation') {
-            vscode.env.openExternal(vscode.Uri.parse('https://github.com/dnl-trrs/AI-Software-Scanner'));
-        }
-    });
+    // Show welcome message in status bar instead of notification
+    vscode.window.setStatusBarMessage('🛡️ AI Security Scanner activated!', 5000);
 }
 
 /**
@@ -169,10 +172,11 @@ export function activate(context: vscode.ExtensionContext) {
 async function scanCurrentFile() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage('No active file to scan');
+        vscode.window.setStatusBarMessage('⚠️ No active file to scan', 3000);
         return;
     }
 
+    filesScannedCount++;
     await scanDocument(editor.document);
 }
 
@@ -355,31 +359,35 @@ function logScanResults(vulnerabilities: Vulnerability[], recommendations: any[]
 }
 
 /**
- * Show scan summary notification
+ * Show scan summary in status bar
  */
 function showScanSummary(vulnerabilities: Vulnerability[], recommendations: any[]) {
     if (vulnerabilities.length === 0) {
-        vscode.window.showInformationMessage('✅ No security vulnerabilities found!');
+        vscode.window.setStatusBarMessage('✅ No security vulnerabilities found!', 3000);
         return;
     }
     
     const summary = aiEngine.generateSummary(recommendations);
-    const message = `Found ${vulnerabilities.length} vulnerabilities. ` +
-                   `Estimated fix time: ${summary.totalFixTime} minutes. ` +
-                   `Confidence: ${summary.averageConfidence}%`;
+    const message = `Found ${vulnerabilities.length} vulnerabilities. Est. fix time: ${summary.totalFixTime} min`;
     
-    vscode.window.showWarningMessage(
-        message,
-        'View Details',
-        'Apply All Fixes'
-    ).then(selection => {
-        if (selection === 'View Details') {
-            vscode.commands.executeCommand('ai-software-scanner.showSecurityPanel');
-        } else if (selection === 'Apply All Fixes') {
-            // Apply automated fixes
-            applyAllFixes(vulnerabilities, recommendations);
-        }
-    });
+    // Update status bar and sidebar
+    vscode.window.setStatusBarMessage(`🔍 ${message}`, 5000);
+    
+    // Store recommendations globally
+    currentRecommendations = recommendations;
+    
+    // Update sidebar
+    if (sidebarProvider) {
+        sidebarProvider.updateStats({
+            recommendationsCount: vulnerabilities.length,
+            issuesFixed: acceptedCount,
+            filesScanned: filesScannedCount,
+            lastScan: new Date().toLocaleTimeString()
+        });
+        
+        // Show first few results in sidebar
+        sidebarProvider.showScanResults(vulnerabilities.slice(0, 5));
+    }
 }
 
 /**
@@ -476,12 +484,66 @@ function shouldScanDocument(document: vscode.TextDocument): boolean {
 function showDemoRecommendations() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage('Please open a file to see demo recommendations');
+        vscode.window.setStatusBarMessage('⚠️ Please open a file to see demo recommendations', 3000);
         return;
     }
+    
+    // Reset counters for demo
+    acceptedCount = 0;
+    filesScannedCount = 1;
 
-    // Sample recommendations matching your Figma mockup
+    // Sample recommendations matching your Figma mockup - expanded with more examples
     const demoRecommendations: Recommendation[] = [
+        {
+            line: 12,
+            column: 20,
+            endLine: 12,
+            endColumn: 60,
+            severity: 'critical',
+            type: 'SQL Injection',
+            message: 'Direct string concatenation in SQL query creates SQL injection vulnerability',
+            suggestion: 'Use parameterized queries or prepared statements to prevent SQL injection'
+        },
+        {
+            line: 23,
+            column: 12,
+            endLine: 23,
+            endColumn: 45,
+            severity: 'high',
+            type: 'Weak Random Generation',
+            message: 'Math.random() is not cryptographically secure for tokens',
+            suggestion: 'Use crypto.randomBytes() or similar cryptographic random functions'
+        },
+        {
+            line: 30,
+            column: 15,
+            endLine: 30,
+            endColumn: 40,
+            severity: 'critical',
+            type: 'Hardcoded Password',
+            message: 'Password stored in plain text in source code',
+            suggestion: 'Use environment variables or secure secret management systems'
+        },
+        {
+            line: 37,
+            column: 10,
+            endLine: 37,
+            endColumn: 55,
+            severity: 'high',
+            type: 'XSS Vulnerability',
+            message: 'User input directly rendered without sanitization',
+            suggestion: 'Sanitize user input before rendering to prevent XSS attacks'
+        },
+        {
+            line: 54,
+            column: 18,
+            endLine: 54,
+            endColumn: 35,
+            severity: 'critical',
+            type: 'Code Injection',
+            message: 'Using eval() with user input is extremely dangerous',
+            suggestion: 'Parse and validate input instead of using eval()'
+        },
         {
             line: 61,
             column: 20,
@@ -501,6 +563,16 @@ function showDemoRecommendations() {
             type: 'InsecureRandomValue',
             message: 'Using predictable random values can lead to security vulnerabilities',
             suggestion: 'Use cryptographically secure random number generation'
+        },
+        {
+            line: 81,
+            column: 30,
+            endLine: 82,
+            endColumn: 95,
+            severity: 'medium',
+            type: 'Missing Input Validation',
+            message: 'User input used without proper validation',
+            suggestion: 'Validate and sanitize all user inputs before processing'
         }
     ];
 
@@ -510,41 +582,102 @@ function showDemoRecommendations() {
         demoRecommendations
     );
 
-    // Update sidebar count
-    sidebarProvider.updateRecommendations(demoRecommendations.length);
-
-    // Show a sample recommendation panel after a short delay
-    setTimeout(() => {
-        const sampleRecommendation = {
-            line: 61,
-            column: 20,
-            severity: 'medium',
-            type: 'ExpDistribution Security Issue',
-            message: 'Potential security vulnerability in probability distribution',
-            suggestion: 'Use secure random generation with proper entropy sources',
-            currentCode: 'ExpDistribution(mean: fields["mean-duration"].toDouble()),\nExpDistribution(mean: fields["mean-interarrival-time"].toDouble()),',
-            fixedCode: 'SecureExpDistribution(mean: fields["mean-duration"].toDouble(), entropy: SecureRandom()),\nSecureExpDistribution(mean: fields["mean-interarrival-time"].toDouble(), entropy: SecureRandom()),',
-            explanation: 'Using predictable random distributions can make your application vulnerable to timing attacks and prediction exploits. By using cryptographically secure random sources, you ensure that attackers cannot predict or manipulate the distribution outcomes.'
-        };
-
-        RecommendationPanel.createOrShow(vscode.Uri.file(editor.document.fileName), sampleRecommendation);
-    }, 1000);
-
-    vscode.window.showInformationMessage(
-        '🎨 Demo UI loaded! Check the sidebar and code decorations.',
-        'View Details'
-    ).then(selection => {
-        if (selection === 'View Details') {
-            outputChannel.appendLine('\n=== Demo Recommendations ===');
-            outputChannel.appendLine(`Found ${demoRecommendations.length} security issues`);
-            demoRecommendations.forEach((rec, i) => {
-                outputChannel.appendLine(`\n${i + 1}. [${rec.severity.toUpperCase()}] ${rec.type}`);
-                outputChannel.appendLine(`   Line ${rec.line}: ${rec.message}`);
-                outputChannel.appendLine(`   Fix: ${rec.suggestion}`);
-            });
-            outputChannel.show();
-        }
+    // Store recommendations globally
+    currentRecommendations = demoRecommendations.map((rec, index) => ({
+        ...rec,
+        currentCode: getExampleCode(rec.type, 'before'),
+        fixedCode: getExampleCode(rec.type, 'after'),
+        explanation: getExplanation(rec.type)
+    }));
+    
+    // Update sidebar with stats and scan results
+    sidebarProvider.updateStats({
+        recommendationsCount: demoRecommendations.length,
+        issuesFixed: 0,
+        filesScanned: 1,
+        lastScan: new Date().toLocaleTimeString()
     });
+    
+    // Show scan results in sidebar
+    sidebarProvider.showScanResults(demoRecommendations.slice(0, 5)); // Show first 5 in sidebar
+
+    // Don't automatically open the panel - let user click 'View All Recommendations'
+    vscode.window.setStatusBarMessage(`🔍 Scan complete! Found ${demoRecommendations.length} issues. Click 'View All Recommendations' in sidebar.`, 5000);
+
+    // Log to output channel without showing notification
+    outputChannel.appendLine('\n=== Demo Scan Complete ===');
+    outputChannel.appendLine(`Found ${demoRecommendations.length} security issues:`);
+    
+    // Group by severity
+    const bySeverity = {
+        critical: demoRecommendations.filter(r => r.severity === 'critical'),
+        high: demoRecommendations.filter(r => r.severity === 'high'),
+        medium: demoRecommendations.filter(r => r.severity === 'medium'),
+        low: demoRecommendations.filter(r => r.severity === 'low')
+    };
+    
+    outputChannel.appendLine(`\nCritical: ${bySeverity.critical.length} | High: ${bySeverity.high.length} | Medium: ${bySeverity.medium.length} | Low: ${bySeverity.low.length}`);
+    outputChannel.appendLine('\nCheck the sidebar for details or click "View All Recommendations" to review.');
+}
+
+/**
+ * Helper function to get example code for different vulnerability types
+ */
+function getExampleCode(type: string, version: 'before' | 'after'): string {
+    const examples: Record<string, { before: string; after: string }> = {
+        'SQL Injection': {
+            before: 'const query = "SELECT * FROM users WHERE id = " + userId;',
+            after: 'const query = "SELECT * FROM users WHERE id = ?";\n// Use parameterized query: connection.query(query, [userId])'
+        },
+        'Weak Random Generation': {
+            before: 'return Math.random().toString(36).substring(2);',
+            after: 'const crypto = require(\'crypto\');\nreturn crypto.randomBytes(32).toString(\'hex\');'
+        },
+        'Hardcoded Password': {
+            before: 'password: \'password123\' // Never store passwords in plain text!',
+            after: 'password: process.env.DB_PASSWORD // Use environment variables'
+        },
+        'XSS Vulnerability': {
+            before: 'res.send(`<h1>Search results for: ${searchTerm}</h1>`);',
+            after: 'const sanitized = escapeHtml(searchTerm);\nres.send(`<h1>Search results for: ${sanitized}</h1>`);'
+        },
+        'Code Injection': {
+            before: 'const result = eval(expression);',
+            after: 'const result = safeCalculate(expression); // Use a safe parser'
+        },
+        'ExpDistribution': {
+            before: 'ExpDistribution(mean: fields["mean-duration"].toDouble())',
+            after: 'SecureExpDistribution(mean: fields["mean-duration"].toDouble(), entropy: SecureRandom())'
+        },
+        'InsecureRandomValue': {
+            before: 'fields["mean-interarrival-time"].toDouble()',
+            after: 'SecureRandom.nextDouble(fields["mean-interarrival-time"])'
+        },
+        'Missing Input Validation': {
+            before: 'const input = req.body.data;\nprocessData(input);',
+            after: 'const input = validateInput(req.body.data);\nif (input) processData(input);'
+        }
+    };
+    
+    return examples[type]?.[version] || (version === 'before' ? '// Vulnerable code' : '// Fixed code');
+}
+
+/**
+ * Helper function to get explanations for vulnerability types
+ */
+function getExplanation(type: string): string {
+    const explanations: Record<string, string> = {
+        'SQL Injection': 'SQL injection allows attackers to execute arbitrary SQL commands, potentially accessing or destroying your database.',
+        'Weak Random Generation': 'Math.random() is predictable and not suitable for security purposes like generating tokens or passwords.',
+        'Hardcoded Password': 'Storing passwords in source code exposes them to anyone with repository access and makes rotation difficult.',
+        'XSS Vulnerability': 'Cross-site scripting allows attackers to inject malicious scripts that run in users\' browsers.',
+        'Code Injection': 'eval() executes arbitrary code, allowing attackers to run malicious commands on your server.',
+        'ExpDistribution': 'Using predictable random distributions can make your application vulnerable to timing attacks.',
+        'InsecureRandomValue': 'Predictable random values can be exploited by attackers to compromise security mechanisms.',
+        'Missing Input Validation': 'Unvalidated input can lead to various security vulnerabilities including injection attacks.'
+    };
+    
+    return explanations[type] || 'This vulnerability could compromise the security of your application.';
 }
 
 /**

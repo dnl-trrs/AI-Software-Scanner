@@ -78,11 +78,6 @@
         "command": "ai-software-scanner.showRecommendations",
         "title": "View All Recommendations",
         "category": "AI Security"
-      },
-      {
-        "command": "ai-software-scanner.manageSubscription",
-        "title": "Manage Subscription",
-        "category": "AI Security"
       }
     ],
     "menus": {
