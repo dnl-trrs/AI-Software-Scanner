@@ -13,7 +13,23 @@
     "commands": [
       {
         "command": "ai-software-scanner.scanFile",
-        "title": "Scan File for Security Issues"
+        "title": "AI Scanner: Scan Current File",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "ai-software-scanner.scanWorkspace",
+        "title": "AI Scanner: Scan Workspace",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "ai-software-scanner.clearResults",
+        "title": "AI Scanner: Clear Results",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "ai-software-scanner.showSettings",
+        "title": "AI Scanner: Open Settings",
+        "icon": "$(settings-gear)"
       }
     ],
     "configuration": {
