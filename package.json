@@ -28,6 +28,17 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "aiScanner.sidebar",
+          "name": "AI Scanner",
+          "icon": "$(shield)",
+          "contextualTitle": "AI Software Scanner"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ai-software-scanner.scanFile",
@@ -55,6 +66,17 @@
       {
         "command": "ai-software-scanner.showEducation",
         "title": "Show Security Education",
+        "category": "AI Security"
+      },
+      {
+        "command": "ai-software-scanner.demoUI",
+        "title": "Demo UI (Show Sample Recommendations)",
+        "category": "AI Security",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "ai-software-scanner.showRecommendations",
+        "title": "View All Recommendations",
         "category": "AI Security"
       }
     ],

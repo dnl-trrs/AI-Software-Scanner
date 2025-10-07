@@ -1,0 +1,549 @@
+import * as vscode from 'vscode';
+
+export class RecommendationPanel {
+    public static currentPanel: RecommendationPanel | undefined;
+
+    private readonly _panel: vscode.WebviewPanel;
+    private readonly _extensionUri: vscode.Uri;
+    private _disposables: vscode.Disposable[] = [];
+    private _recommendations: any[] = [];
+    private _currentIndex: number = 0;
+
+    public static createOrShow(extensionUri: vscode.Uri, recommendations: any[] | any) {
+        const column = vscode.window.activeTextEditor
+            ? vscode.window.activeTextEditor.viewColumn
+            : undefined;
+
+        // Convert single recommendation to array if needed
+        const recsArray = Array.isArray(recommendations) ? recommendations : [recommendations];
+
+        // If we already have a panel, show it
+        if (RecommendationPanel.currentPanel) {
+            RecommendationPanel.currentPanel._panel.reveal(column);
+            RecommendationPanel.currentPanel._recommendations = recsArray;
+            RecommendationPanel.currentPanel._currentIndex = 0;
+            RecommendationPanel.currentPanel._update();
+            return;
+        }
+
+        // Otherwise, create a new panel
+        const panel = vscode.window.createWebviewPanel(
+            'recommendationDetails',
+            'Recommendation Details',
+            column || vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                localResourceRoots: [extensionUri]
+            }
+        );
+
+        RecommendationPanel.currentPanel = new RecommendationPanel(panel, extensionUri, recsArray);
+    }
+
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, recommendations: any[]) {
+        this._panel = panel;
+        this._extensionUri = extensionUri;
+        this._recommendations = recommendations;
+        this._currentIndex = 0;
+
+        // Set the webview's initial html content
+        this._update();
+
+        // Listen for when the panel is disposed
+        this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        // Handle messages from the webview
+        this._panel.webview.onDidReceiveMessage(
+            message => {
+                switch (message.command) {
+                    case 'accept':
+                        vscode.commands.executeCommand('ai-software-scanner.acceptRecommendation', message.data);
+                        // Move to next recommendation or close if last
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        } else {
+                            vscode.window.setStatusBarMessage(`✅ All ${this._recommendations.length} recommendations reviewed!`, 3000);
+                            this._panel.dispose();
+                        }
+                        break;
+                    case 'decline':
+                        vscode.commands.executeCommand('ai-software-scanner.declineRecommendation', message.data);
+                        // Move to next recommendation or close if last
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        } else {
+                            vscode.window.setStatusBarMessage(`✅ All ${this._recommendations.length} recommendations reviewed!`, 3000);
+                            this._panel.dispose();
+                        }
+                        break;
+                    case 'learnMore':
+                        vscode.commands.executeCommand('ai-software-scanner.showEducation', message.data);
+                        break;
+                    case 'previous':
+                        if (this._currentIndex > 0) {
+                            this._currentIndex--;
+                            this._update();
+                        }
+                        break;
+                    case 'next':
+                        if (this._currentIndex < this._recommendations.length - 1) {
+                            this._currentIndex++;
+                            this._update();
+                        }
+                        break;
+                }
+            },
+            null,
+            this._disposables
+        );
+    }
+
+    public dispose() {
+        RecommendationPanel.currentPanel = undefined;
+
+        // Clean up our resources
+        this._panel.dispose();
+
+        while (this._disposables.length) {
+            const x = this._disposables.pop();
+            if (x) {
+                x.dispose();
+            }
+        }
+    }
+
+    private _update() {
+        const currentRec = this._recommendations[this._currentIndex];
+        this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, currentRec);
+    }
+
+    private _getHtmlForWebview(webview: vscode.Webview, recommendation: any) {
+        const nonce = this.getNonce();
+        const isFirst = this._currentIndex === 0;
+        const isLast = this._currentIndex === this._recommendations.length - 1;
+        const currentNum = this._currentIndex + 1;
+        const totalNum = this._recommendations.length;
+
+        return `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+                <title>Recommendation Details</title>
+                <style>
+                    body {
+                        font-family: var(--vscode-font-family);
+                        color: var(--vscode-foreground);
+                        background: var(--vscode-editor-background);
+                        padding: 0;
+                        margin: 0;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                    }
+
+                    .modal-container {
+                        background: var(--vscode-editor-background);
+                        border: 1px solid var(--vscode-widget-border);
+                        border-radius: 8px;
+                        width: 700px;
+                        height: 800px;
+                        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+                        animation: slideIn 0.3s ease-out;
+                        display: flex;
+                        flex-direction: column;
+                    }
+
+                    @keyframes slideIn {
+                        from {
+                            opacity: 0;
+                            transform: translateY(-20px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+
+                    .modal-header {
+                        padding: 20px 24px;
+                        border-bottom: 1px solid var(--vscode-widget-border);
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        height: 70px;
+                        position: relative;
+                    }
+
+                    .modal-title {
+                        font-size: 18px;
+                        font-weight: 600;
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        flex: 1;
+                    }
+                    
+                    .navigation-controls {
+                        display: flex;
+                        align-items: center;
+                        gap: 16px;
+                    }
+                    
+                    .nav-button {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 50%;
+                        border: 1px solid var(--vscode-widget-border);
+                        background: transparent;
+                        color: var(--vscode-foreground);
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.2s;
+                        font-size: 18px;
+                    }
+                    
+                    .nav-button:hover:not(:disabled) {
+                        background: var(--vscode-button-hoverBackground);
+                        color: var(--vscode-button-foreground);
+                    }
+                    
+                    .nav-button:disabled {
+                        opacity: 0.4;
+                        cursor: not-allowed;
+                    }
+                    
+                    .counter {
+                        font-size: 14px;
+                        color: var(--vscode-descriptionForeground);
+                        font-weight: normal;
+                        padding: 6px 14px;
+                        background: var(--vscode-badge-background);
+                        border-radius: 12px;
+                        white-space: nowrap;
+                    }
+                    
+                    .nav-group {
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+
+                    .severity-badge {
+                        padding: 4px 10px;
+                        border-radius: 12px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        text-transform: uppercase;
+                        display: inline-block;
+                    }
+
+                    .severity-critical {
+                        background: #ff0000;
+                        color: white;
+                    }
+
+                    .severity-high {
+                        background: #ff8800;
+                        color: white;
+                    }
+
+                    .severity-medium {
+                        background: #ffcc00;
+                        color: black;
+                    }
+
+                    .severity-low {
+                        background: #0099ff;
+                        color: white;
+                    }
+
+                    .modal-body {
+                        padding: 24px;
+                        flex: 1;
+                        overflow-y: auto;
+                        display: flex;
+                        flex-direction: column;
+                    }
+
+                    .section {
+                        margin-bottom: 24px;
+                    }
+                    
+                    .section.issue-section {
+                        height: 70px;
+                        overflow: hidden;
+                    }
+                    
+                    .section.code-section {
+                        height: 130px;
+                    }
+                    
+                    .section.recommendation-section {
+                        height: 170px;
+                    }
+                    
+                    .section.explanation-section {
+                        height: 200px;
+                        overflow-y: auto;
+                        padding-right: 8px;
+                    }
+
+                    .section:last-child {
+                        margin-bottom: 0;
+                    }
+
+                    .section-title {
+                        font-size: 14px;
+                        font-weight: 600;
+                        margin-bottom: 8px;
+                        color: var(--vscode-foreground);
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+
+                    .section-content {
+                        font-size: 13px;
+                        line-height: 1.5;
+                        color: var(--vscode-descriptionForeground);
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+
+                    .code-block {
+                        background: var(--vscode-textCodeBlock-background);
+                        border: 1px solid var(--vscode-widget-border);
+                        border-radius: 4px;
+                        padding: 12px;
+                        margin: 12px 0;
+                        font-family: var(--vscode-editor-font-family);
+                        font-size: 12px;
+                        height: 80px;
+                        overflow: auto;
+                    }
+
+                    .code-before {
+                        background: rgba(255, 0, 0, 0.1);
+                        border-left: 3px solid #ff0000;
+                    }
+
+                    .code-after {
+                        background: rgba(0, 255, 0, 0.1);
+                        border-left: 3px solid #00ff00;
+                    }
+
+                    .modal-footer {
+                        padding: 20px 24px;
+                        border-top: 1px solid var(--vscode-widget-border);
+                        display: flex;
+                        justify-content: flex-end;
+                        gap: 12px;
+                        flex-shrink: 0;
+                        height: 70px;
+                    }
+
+                    .button {
+                        padding: 8px 20px;
+                        border: none;
+                        border-radius: 2px;
+                        font-size: 13px;
+                        font-family: var(--vscode-font-family);
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                    }
+
+                    .button-primary {
+                        background: var(--vscode-button-background);
+                        color: var(--vscode-button-foreground);
+                    }
+
+                    .button-primary:hover {
+                        background: var(--vscode-button-hoverBackground);
+                    }
+
+                    .button-secondary {
+                        background: transparent;
+                        color: var(--vscode-foreground);
+                        border: 1px solid var(--vscode-widget-border);
+                    }
+
+                    .button-secondary:hover {
+                        background: var(--vscode-widget-shadow);
+                    }
+
+                    .location-info {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 3px 8px;
+                        background: var(--vscode-badge-background);
+                        color: var(--vscode-badge-foreground);
+                        border-radius: 4px;
+                        font-size: 12px;
+                        font-weight: normal;
+                    }
+
+                    .icon {
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        margin-right: 4px;
+                    }
+
+                    .recommendation-icon {
+                        font-size: 20px;
+                    }
+
+                    .learn-more-link {
+                        color: var(--vscode-textLink-foreground);
+                        text-decoration: none;
+                        cursor: pointer;
+                        font-size: 12px;
+                    }
+
+                    .learn-more-link:hover {
+                        text-decoration: underline;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="modal-container">
+                    <div class="modal-header">
+                        <div class="modal-title">
+                            <span class="recommendation-icon">💡</span>
+                            Recommendation Action
+                        </div>
+                        <div class="navigation-controls">
+                            <span class="severity-badge severity-${recommendation.severity || 'medium'}">${recommendation.severity || 'medium'}</span>
+                            <div class="nav-group">
+                                <button class="nav-button" id="prevBtn" ${isFirst ? 'disabled' : ''} title="Previous recommendation">
+                                    ‹
+                                </button>
+                                <span class="counter">${currentNum} of ${totalNum}</span>
+                                <button class="nav-button" id="nextBtn" ${isLast ? 'disabled' : ''} title="Next recommendation">
+                                    ›
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-body">
+                        <div class="section issue-section">
+                            <div class="section-title">
+                                Issue Detected
+                                <span class="location-info">
+                                    📍 Line ${recommendation.line || '1'}, Column ${recommendation.column || '1'}
+                                </span>
+                            </div>
+                            <div class="section-content">
+                                ${recommendation.type || 'Security Issue'}: ${recommendation.message || 'Potential security vulnerability detected'}
+                            </div>
+                        </div>
+
+                        <div class="section code-section">
+                            <div class="section-title">Current Code</div>
+                            <div class="code-block code-before">
+                                <code>${recommendation.currentCode || 'public class HelloWorld {\\n    public static void main(String[] args) {\\n        System.out.println("Hello, World!");\\n    }\\n}'}</code>
+                            </div>
+                        </div>
+
+                        <div class="section recommendation-section">
+                            <div class="section-title">Recommended Fix</div>
+                            <div class="section-content">
+                                ${recommendation.suggestion || 'Apply security best practices to prevent potential vulnerabilities'}
+                            </div>
+                            <div class="code-block code-after">
+                                <code>${recommendation.fixedCode || 'public class HelloWorld {\\n    public static void main(String[] args) {\\n        System.out.println("Hello, World!");\\n    }\\n}'}</code>
+                            </div>
+                        </div>
+
+                        <div class="section explanation-section">
+                            <div class="section-title">Why This Matters</div>
+                            <div class="section-content">
+                                ${recommendation.explanation || 'This recommendation helps improve code security and follows industry best practices.'}
+                                <br><br>
+                                <a class="learn-more-link" id="learnMore">📚 Learn more about ${recommendation.type || 'this issue'}</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer">
+                        <button class="button button-secondary" id="declineBtn">Decline</button>
+                        <button class="button button-primary" id="acceptBtn">✓ Accept</button>
+                    </div>
+                </div>
+
+                <script nonce="${nonce}">
+                    const vscode = acquireVsCodeApi();
+                    const recommendation = ${JSON.stringify(recommendation)};
+
+                    document.getElementById('acceptBtn').addEventListener('click', () => {
+                        vscode.postMessage({
+                            command: 'accept',
+                            data: recommendation
+                        });
+                    });
+
+                    document.getElementById('declineBtn').addEventListener('click', () => {
+                        vscode.postMessage({
+                            command: 'decline',
+                            data: recommendation
+                        });
+                    });
+
+                    document.getElementById('learnMore').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        vscode.postMessage({
+                            command: 'learnMore',
+                            data: recommendation.type
+                        });
+                    });
+                    
+                    const prevBtn = document.getElementById('prevBtn');
+                    const nextBtn = document.getElementById('nextBtn');
+                    
+                    if (prevBtn) {
+                        prevBtn.addEventListener('click', () => {
+                            if (!prevBtn.disabled) {
+                                vscode.postMessage({ command: 'previous' });
+                            }
+                        });
+                    }
+                    
+                    if (nextBtn) {
+                        nextBtn.addEventListener('click', () => {
+                            if (!nextBtn.disabled) {
+                                vscode.postMessage({ command: 'next' });
+                            }
+                        });
+                    }
+                    
+                    // Add keyboard navigation
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowLeft' && prevBtn && !prevBtn.disabled) {
+                            vscode.postMessage({ command: 'previous' });
+                        } else if (e.key === 'ArrowRight' && nextBtn && !nextBtn.disabled) {
+                            vscode.postMessage({ command: 'next' });
+                        }
+                    });
+                </script>
+            </body>
+            </html>`;
+    }
+
+    private getNonce() {
+        let text = '';
+        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        for (let i = 0; i < 32; i++) {
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
+    }
+}
