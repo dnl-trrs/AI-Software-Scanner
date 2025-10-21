@@ -137,7 +137,12 @@
         "aiSecurityScanner.severityLevel": {
           "type": "string",
           "default": "medium",
-          "enum": ["low", "medium", "high", "critical"],
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
           "description": "Minimum severity level to report"
         },
         "aiSecurityScanner.enableEducationalContent": {
@@ -152,9 +157,18 @@
         },
         "aiSecurityScanner.aiProvider": {
           "type": "string",
-          "default": "local",
-          "enum": ["local", "openai", "claude"],
+          "default": "openai",
+          "enum": [
+            "local",
+            "openai",
+            "claude"
+          ],
           "description": "AI provider for enhanced recommendations"
+        },
+        "aiSecurityScanner.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key for ChatGPT integration. Get your key at platform.openai.com"
         }
       }
     }
@@ -168,15 +182,15 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.74.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
+    "@types/vscode": "^1.74.0",
     "@typescript-eslint/eslint-plugin": "^8.3.0",
     "@typescript-eslint/parser": "^8.3.0",
-    "eslint": "^9.9.1",
-    "typescript": "^5.5.4",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.9.1",
+    "typescript": "^5.5.4"
   },
   "repository": {
     "type": "git",
@@ -185,5 +199,9 @@
   "bugs": {
     "url": "https://github.com/dnl-trrs/AI-Software-Scanner/issues"
   },
-  "homepage": "https://github.com/dnl-trrs/AI-Software-Scanner#readme"
+  "homepage": "https://github.com/dnl-trrs/AI-Software-Scanner#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "openai": "^6.6.0"
+  }
 }

@@ -83,46 +83,51 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         padding: 0;
                         margin: 0;
                         background: var(--vscode-sideBar-background);
+                        font-family: var(--vscode-font-family);
                     }
                     
                     .header {
-                        padding: 20px;
+                        padding: 24px 20px;
                         border-bottom: 1px solid var(--vscode-widget-border);
                     }
                     
                     .title {
-                        font-size: 14px;
+                        font-size: 16px;
                         font-weight: 600;
                         color: var(--vscode-foreground);
-                        margin-bottom: 8px;
+                        margin-bottom: 10px;
+                        letter-spacing: -0.3px;
                     }
                     
                     .subtitle {
-                        font-size: 11px;
+                        font-size: 12px;
                         color: var(--vscode-descriptionForeground);
-                        line-height: 1.4;
+                        line-height: 1.5;
+                        opacity: 0.9;
                     }
                     
                     .actions {
                         padding: 20px;
+                        padding-top: 24px;
                     }
                     
                     .action-button {
                         width: 100%;
-                        padding: 12px 24px;
-                        margin-bottom: 12px;
+                        padding: 14px 24px;
+                        margin-bottom: 16px;
                         background: var(--vscode-button-background);
                         color: var(--vscode-button-foreground);
                         border: none;
-                        border-radius: 20px;
+                        border-radius: 6px;
                         cursor: pointer;
                         font-size: 13px;
+                        font-weight: 500;
                         font-family: var(--vscode-font-family);
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         transition: all 0.2s ease;
-                        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
                     }
                     
                     .action-button:hover {
@@ -144,40 +149,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         margin-right: 8px;
                     }
                     
-                    .scan-progress {
-                        display: none;
-                        text-align: center;
-                        padding: 12px;
-                        color: var(--vscode-foreground);
-                        font-size: 12px;
-                    }
-                    
-                    .scan-progress.active {
-                        display: block;
-                    }
-                    
-                    .progress-bar {
-                        width: 100%;
-                        height: 3px;
-                        background: var(--vscode-progressBar-background);
-                        margin-top: 8px;
-                        border-radius: 2px;
-                        overflow: hidden;
-                    }
-                    
-                    .progress-fill {
-                        height: 100%;
-                        background: var(--vscode-progressBar-foreground);
-                        width: 0;
-                        transition: width 0.3s;
-                    }
-                    
                     .recommendations-info {
-                        padding: 16px 20px;
+                        padding: 20px;
                         background: var(--vscode-editor-background);
-                        margin: 0 20px 20px;
+                        margin: 0 20px 24px;
                         border-radius: 8px;
-                        border-left: 3px solid #007ACC;
+                        border-left: 4px solid #007ACC;
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
@@ -196,7 +173,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
                     
                     .stats-section {
-                        padding: 16px 20px;
+                        padding: 20px;
                         border-top: 1px solid var(--vscode-widget-border);
                     }
                     
@@ -204,17 +181,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        padding: 8px 0;
-                        font-size: 12px;
+                        padding: 12px 0;
+                        font-size: 13px;
+                        border-bottom: 1px solid var(--vscode-widget-border);
+                        opacity: 0;
+                        animation: fadeIn 0.3s ease forwards;
+                    }
+                    
+                    .stats-item:last-child {
+                        border-bottom: none;
                     }
                     
                     .stats-label {
                         color: var(--vscode-descriptionForeground);
+                        font-weight: 400;
                     }
                     
                     .stats-value {
                         font-weight: 600;
                         color: var(--vscode-foreground);
+                        font-size: 14px;
+                    }
+                    
+                    @keyframes fadeIn {
+                        to { opacity: 1; }
                     }
                     
                     .scan-results {
@@ -280,15 +270,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 <div class="actions">
                     <button class="action-button primary" id="scanFile">
                         <span class="icon">🔍</span>
-                        Scan File
+                        Scan Current File
                     </button>
-                    
-                    <div class="scan-progress" id="scanProgress">
-                        <span>Scanning...</span>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill"></div>
-                        </div>
-                    </div>
                     
                     <button class="action-button" id="viewRecommendations">
                         <span class="icon">📋</span>
@@ -321,25 +304,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     
                     document.getElementById('scanFile').addEventListener('click', () => {
                         vscode.postMessage({ type: 'scanFile' });
-                        
-                        // Show progress
-                        const progress = document.getElementById('scanProgress');
-                        const progressFill = document.getElementById('progressFill');
-                        progress.classList.add('active');
-                        
-                        // Simulate progress
-                        let width = 0;
-                        const interval = setInterval(() => {
-                            width += 10;
-                            progressFill.style.width = width + '%';
-                            if (width >= 100) {
-                                clearInterval(interval);
-                                setTimeout(() => {
-                                    progress.classList.remove('active');
-                                    progressFill.style.width = '0%';
-                                }, 500);
-                            }
-                        }, 200);
                     });
                     
                     document.getElementById('viewRecommendations').addEventListener('click', () => {

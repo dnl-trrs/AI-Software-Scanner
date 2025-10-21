@@ -150,8 +150,10 @@ export class RecommendationPanel {
                         background: var(--vscode-editor-background);
                         border: 1px solid var(--vscode-widget-border);
                         border-radius: 8px;
-                        width: 700px;
-                        height: 800px;
+                        width: 900px;
+                        max-width: 95vw;
+                        height: 90vh;
+                        max-height: 900px;
                         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
                         animation: slideIn 0.3s ease-out;
                         display: flex;
@@ -175,8 +177,8 @@ export class RecommendationPanel {
                         display: flex;
                         align-items: center;
                         justify-content: space-between;
-                        height: 70px;
-                        position: relative;
+                        flex-shrink: 0;
+                        min-height: 70px;
                     }
 
                     .modal-title {
@@ -270,34 +272,37 @@ export class RecommendationPanel {
                         overflow-y: auto;
                         display: flex;
                         flex-direction: column;
+                        gap: 20px;
                     }
 
                     .section {
-                        margin-bottom: 24px;
+                        display: flex;
+                        flex-direction: column;
+                        min-height: 0;
                     }
                     
                     .section.issue-section {
-                        height: 70px;
-                        overflow: hidden;
+                        flex-shrink: 0;
                     }
                     
                     .section.code-section {
-                        height: 130px;
+                        flex: 0 1 auto;
+                        min-height: 120px;
+                        max-height: 250px;
                     }
                     
                     .section.recommendation-section {
-                        height: 170px;
+                        flex: 0 1 auto;
+                        min-height: 150px;
+                        max-height: 300px;
                     }
                     
                     .section.explanation-section {
-                        height: 200px;
+                        flex: 1 1 auto;
+                        min-height: 150px;
                         overflow-y: auto;
-                        padding-right: 8px;
                     }
 
-                    .section:last-child {
-                        margin-bottom: 0;
-                    }
 
                     .section-title {
                         font-size: 14px;
@@ -311,10 +316,24 @@ export class RecommendationPanel {
 
                     .section-content {
                         font-size: 13px;
-                        line-height: 1.5;
+                        line-height: 1.6;
                         color: var(--vscode-descriptionForeground);
-                        overflow: hidden;
-                        text-overflow: ellipsis;
+                        flex: 1;
+                        overflow-y: auto;
+                        padding-right: 8px;
+                    }
+                    
+                    .section-content::-webkit-scrollbar {
+                        width: 6px;
+                    }
+                    
+                    .section-content::-webkit-scrollbar-thumb {
+                        background-color: var(--vscode-scrollbarSlider-background);
+                        border-radius: 3px;
+                    }
+                    
+                    .section-content::-webkit-scrollbar-thumb:hover {
+                        background-color: var(--vscode-scrollbarSlider-hoverBackground);
                     }
 
                     .code-block {
@@ -322,11 +341,30 @@ export class RecommendationPanel {
                         border: 1px solid var(--vscode-widget-border);
                         border-radius: 4px;
                         padding: 12px;
-                        margin: 12px 0;
+                        margin: 8px 0;
                         font-family: var(--vscode-editor-font-family);
                         font-size: 12px;
-                        height: 80px;
+                        line-height: 1.5;
                         overflow: auto;
+                        white-space: pre-wrap;
+                        word-break: break-word;
+                        flex: 1;
+                        min-height: 60px;
+                        max-height: 150px;
+                    }
+                    
+                    .code-block::-webkit-scrollbar {
+                        width: 6px;
+                        height: 6px;
+                    }
+                    
+                    .code-block::-webkit-scrollbar-thumb {
+                        background-color: var(--vscode-scrollbarSlider-background);
+                        border-radius: 3px;
+                    }
+                    
+                    .code-block::-webkit-scrollbar-thumb:hover {
+                        background-color: var(--vscode-scrollbarSlider-hoverBackground);
                     }
 
                     .code-before {
@@ -344,9 +382,10 @@ export class RecommendationPanel {
                         border-top: 1px solid var(--vscode-widget-border);
                         display: flex;
                         justify-content: flex-end;
+                        align-items: center;
                         gap: 12px;
                         flex-shrink: 0;
-                        height: 70px;
+                        min-height: 70px;
                     }
 
                     .button {
@@ -421,7 +460,7 @@ export class RecommendationPanel {
                             Recommendation Action
                         </div>
                         <div class="navigation-controls">
-                            <span class="severity-badge severity-${recommendation.severity || 'medium'}">${recommendation.severity || 'medium'}</span>
+                            <span class="severity-badge severity-${recommendation.vulnerability?.severity || 'medium'}">${recommendation.vulnerability?.severity || 'medium'}</span>
                             <div class="nav-group">
                                 <button class="nav-button" id="prevBtn" ${isFirst ? 'disabled' : ''} title="Previous recommendation">
                                     ‹
@@ -439,37 +478,40 @@ export class RecommendationPanel {
                             <div class="section-title">
                                 Issue Detected
                                 <span class="location-info">
-                                    📍 Line ${recommendation.line || '1'}, Column ${recommendation.column || '1'}
+                                    📍 Line ${recommendation.vulnerability?.line || recommendation.line || '1'}
                                 </span>
                             </div>
                             <div class="section-content">
-                                ${recommendation.type || 'Security Issue'}: ${recommendation.message || 'Potential security vulnerability detected'}
+                                <strong>${recommendation.vulnerability?.type || 'Security Issue'}:</strong><br>
+                                ${recommendation.vulnerability?.message || 'Potential security vulnerability detected'}
                             </div>
                         </div>
 
                         <div class="section code-section">
-                            <div class="section-title">Current Code</div>
+                            <div class="section-title">Vulnerable Code</div>
                             <div class="code-block code-before">
-                                <code>${recommendation.currentCode || 'public class HelloWorld {\\n    public static void main(String[] args) {\\n        System.out.println("Hello, World!");\\n    }\\n}'}</code>
+                                <code>${this.escapeHtml(recommendation.vulnerability?.code || '')}</code>
                             </div>
                         </div>
 
                         <div class="section recommendation-section">
                             <div class="section-title">Recommended Fix</div>
-                            <div class="section-content">
-                                ${recommendation.suggestion || 'Apply security best practices to prevent potential vulnerabilities'}
+                            <div class="section-content" style="margin-bottom: 8px;">
+                                ${recommendation.vulnerability?.recommendation || 'Apply security best practices'}
                             </div>
                             <div class="code-block code-after">
-                                <code>${recommendation.fixedCode || 'public class HelloWorld {\\n    public static void main(String[] args) {\\n        System.out.println("Hello, World!");\\n    }\\n}'}</code>
+                                <code>${this.escapeHtml(recommendation.automaticFix || recommendation.vulnerability?.automaticFix || '')}</code>
                             </div>
                         </div>
 
                         <div class="section explanation-section">
                             <div class="section-title">Why This Matters</div>
                             <div class="section-content">
-                                ${recommendation.explanation || 'This recommendation helps improve code security and follows industry best practices.'}
+                                ${recommendation.explanation || recommendation.vulnerability?.educationalContent || 'This recommendation helps improve code security.'}
                                 <br><br>
-                                <a class="learn-more-link" id="learnMore">📚 Learn more about ${recommendation.type || 'this issue'}</a>
+                                <strong>Estimated fix time:</strong> ${recommendation.estimatedFixTime || '5'} minutes<br>
+                                <strong>Confidence:</strong> ${recommendation.confidence || '85'}%<br><br>
+                                <a class="learn-more-link" id="learnMore">📚 Learn more about ${recommendation.vulnerability?.type || 'this issue'}</a>
                             </div>
                         </div>
                     </div>
@@ -487,7 +529,10 @@ export class RecommendationPanel {
                     document.getElementById('acceptBtn').addEventListener('click', () => {
                         vscode.postMessage({
                             command: 'accept',
-                            data: recommendation
+                            data: {
+                                vulnerability: recommendation.vulnerability,
+                                fix: recommendation.automaticFix || recommendation.vulnerability?.automaticFix
+                            }
                         });
                     });
 
@@ -536,6 +581,16 @@ export class RecommendationPanel {
                 </script>
             </body>
             </html>`;
+    }
+
+    private escapeHtml(unsafe: string): string {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;")
+            .replace(/\n/g, "<br>");
     }
 
     private getNonce() {

@@ -1,10 +1,11 @@
 /**
  * AI Recommendation Engine
- * Provides intelligent, context-aware fix suggestions and educational content
- * This is our key differentiator from competitors like Snyk AI and Qwiet AI
+ * Provides intelligent, context-aware fix suggestions and educational content using ChatGPT
  */
 
 import { Vulnerability, VulnerabilityType } from '../scanner/SecurityScanner';
+import { OpenAIClient } from './OpenAIClient';
+import { RateLimiter } from '../utils/RateLimiter';
 
 export interface AIRecommendation {
     vulnerabilityId: string;
@@ -25,11 +26,21 @@ export interface LearningResource {
 }
 
 export class AIRecommendationEngine {
-    private apiKey: string | undefined;
-    private useLocalModel: boolean = true; // Start with local patterns, can integrate with OpenAI/Claude later
+    private openaiClient: OpenAIClient | null = null;
+    private rateLimiter: RateLimiter;
+    private useLocalModel: boolean = false; // Use ChatGPT when available
 
     constructor(apiKey?: string) {
-        this.apiKey = apiKey;
+        if (apiKey) {
+            // Explicitly use gpt-3.5-turbo for cost efficiency
+            const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+            this.openaiClient = new OpenAIClient(apiKey, model);
+            this.useLocalModel = false;
+            console.log(`AIRecommendationEngine using model: ${model}`);
+        } else {
+            this.useLocalModel = true;
+        }
+        this.rateLimiter = new RateLimiter(15, 1000); // 15 requests per minute for recommendations
     }
 
     /**
@@ -479,12 +490,46 @@ export class AIRecommendationEngine {
     }
 
     /**
-     * Future: Call external AI service for enhanced recommendations
+     * Call ChatGPT API for enhanced recommendations
      */
     private async callAIService(vulnerability: Vulnerability, context?: string): Promise<AIRecommendation> {
-        // This would integrate with OpenAI, Claude, or other AI services
-        // For now, fall back to local recommendations
-        return this.generateLocalRecommendation(vulnerability, context);
+        if (!this.openaiClient) {
+            return this.generateLocalRecommendation(vulnerability, context);
+        }
+
+        try {
+            await this.rateLimiter.waitIfNeeded();
+            
+            // Get enhanced fix from ChatGPT
+            const automaticFix = await this.openaiClient.generateFix(
+                {
+                    type: vulnerability.type,
+                    severity: vulnerability.severity,
+                    line: vulnerability.line,
+                    description: vulnerability.message,
+                    fix: vulnerability.recommendation || '',
+                    educational: vulnerability.educationalContent
+                },
+                context || vulnerability.code
+            );
+            
+            // Get educational content
+            const educational = await this.openaiClient.getEducationalContent(vulnerability.type);
+            
+            return {
+                vulnerabilityId: vulnerability.id,
+                automaticFix,
+                explanation: educational,
+                bestPractices: this.getBestPractices(vulnerability.type),
+                alternativeSolutions: this.getAlternativeSolutions(vulnerability.type),
+                estimatedFixTime: this.estimateFixTime(vulnerability.type),
+                confidence: 85, // Higher confidence with AI
+                learningResources: this.getLearningResources(vulnerability.type)
+            };
+        } catch (error) {
+            console.error('ChatGPT API error, falling back to local:', error);
+            return this.generateLocalRecommendation(vulnerability, context);
+        }
     }
 
     /**

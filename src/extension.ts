@@ -12,6 +12,9 @@
  */
 
 import * as vscode from 'vscode';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+import * as fs from 'fs';
 import SecurityScanner from './scanner/SecurityScanner';
 import AIRecommendationEngine from './ai/AIRecommendationEngine';
 import { SecurityPanelProvider } from './ui/SecurityPanel';
@@ -31,12 +34,60 @@ let currentRecommendations: any[] = [];
 let acceptedCount: number = 0;
 let filesScannedCount: number = 0;
 
+// Track scanned files to prevent duplicate scans
+let scannedFiles = new Set<string>();
+let fileHashes = new Map<string, string>();
+let isScanning = false;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('🔒 AI Software Security Scanner is now active!');
 
-    // Initialize components
-    scanner = new SecurityScanner();
-    aiEngine = new AIRecommendationEngine();
+    // Try to load .env file from workspace
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        const envPath = path.join(workspaceFolders[0].uri.fsPath, '.env');
+        if (fs.existsSync(envPath)) {
+            dotenv.config({ path: envPath });
+            console.log('Loaded .env file from workspace');
+        }
+    }
+
+    // Get API key from configuration or environment
+    const config = vscode.workspace.getConfiguration('aiSecurityScanner');
+    let apiKey = config.get<string>('openaiApiKey');
+    
+    // If not in settings, try environment variable
+    if (!apiKey || apiKey === '') {
+        apiKey = process.env.OPENAI_API_KEY;
+    }
+    
+    if (!apiKey || apiKey === '') {
+        const selection = vscode.window.showWarningMessage(
+            'OpenAI API key not configured. The scanner will use pattern-based detection.',
+            'Add API Key'
+        );
+        
+        selection.then(value => {
+            if (value === 'Add API Key') {
+                vscode.window.showInputBox({
+                    prompt: 'Enter your OpenAI API Key',
+                    password: true,
+                    placeHolder: 'sk-...'
+                }).then(key => {
+                    if (key) {
+                        config.update('openaiApiKey', key, vscode.ConfigurationTarget.Global);
+                        vscode.window.showInformationMessage('API Key saved. Please reload the window to apply changes.');
+                    }
+                });
+            }
+        });
+    } else {
+        console.log('API Key configured successfully');
+    }
+
+    // Initialize components with API key
+    scanner = new SecurityScanner(apiKey);
+    aiEngine = new AIRecommendationEngine(apiKey);
     diagnosticCollection = vscode.languages.createDiagnosticCollection('security');
     outputChannel = vscode.window.createOutputChannel('Security Scanner');
     recommendationDecorator = new RecommendationDecorator();
@@ -59,7 +110,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register commands
     const scanFileCommand = vscode.commands.registerCommand('ai-software-scanner.scanFile', async () => {
-        await scanCurrentFile();
+        // When explicitly triggered by user, force scan even if already scanned
+        await scanCurrentFile(true);
     });
 
     const scanWorkspaceCommand = vscode.commands.registerCommand('ai-software-scanner.scanWorkspace', async () => {
@@ -88,20 +140,53 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const acceptRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.acceptRecommendation', async (data: any) => {
-        // Apply the fix here
-        acceptedCount++;
-        
-        // Update sidebar stats
-        if (sidebarProvider) {
-            sidebarProvider.updateStats({
-                recommendationsCount: currentRecommendations.length - acceptedCount,
-                issuesFixed: acceptedCount,
-                filesScanned: filesScannedCount
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) {
+                vscode.window.showWarningMessage('No active editor to apply fix');
+                return;
+            }
+            
+            // Get the vulnerability and fix from the data
+            const { vulnerability, fix } = data;
+            
+            if (!vulnerability || !fix) {
+                vscode.window.showErrorMessage('Invalid fix data');
+                return;
+            }
+            
+            // Apply the fix to the document
+            await editor.edit((editBuilder) => {
+                const line = vulnerability.line - 1; // Convert to 0-based
+                const lineText = editor.document.lineAt(line);
+                const range = new vscode.Range(
+                    line, 0,
+                    line, lineText.text.length
+                );
+                
+                // Replace the vulnerable line with the fix
+                editBuilder.replace(range, fix);
             });
+            
+            acceptedCount++;
+            
+            // Update sidebar stats
+            if (sidebarProvider) {
+                sidebarProvider.updateStats({
+                    recommendationsCount: currentRecommendations.length - acceptedCount,
+                    issuesFixed: acceptedCount,
+                    filesScanned: filesScannedCount
+                });
+            }
+            
+            // Show temporary status message
+            vscode.window.setStatusBarMessage(`✅ Fix applied (${acceptedCount} fixed so far)`, 3000);
+            
+            // Remove from current recommendations
+            currentRecommendations = currentRecommendations.filter(r => r.vulnerabilityId !== vulnerability.id);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to apply fix: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-        
-        // Show temporary status message instead of notification
-        vscode.window.setStatusBarMessage(`✅ Recommendation applied (${acceptedCount} fixed so far)`, 3000);
     });
 
     const declineRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.declineRecommendation', (data: any) => {
@@ -117,6 +202,13 @@ export function activate(context: vscode.ExtensionContext) {
     const demoUICommand = vscode.commands.registerCommand('ai-software-scanner.demoUI', () => {
         showDemoRecommendations();
     });
+    
+    // Command to clear scan cache
+    const clearCacheCommand = vscode.commands.registerCommand('ai-software-scanner.clearCache', () => {
+        scannedFiles.clear();
+        fileHashes.clear();
+        vscode.window.showInformationMessage('Scan cache cleared. Files will be rescanned on next request.');
+    });
 
     // Register code actions provider for quick fixes
     const codeActionProvider = vscode.languages.registerCodeActionsProvider(
@@ -129,15 +221,35 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Auto-scan on file save
     const onSaveListener = vscode.workspace.onDidSaveTextDocument(async (document) => {
-        if (shouldScanDocument(document)) {
-            await scanDocument(document);
+        const config = vscode.workspace.getConfiguration('aiSecurityScanner');
+        if (config.get<boolean>('scanOnSave') && shouldScanDocument(document)) {
+            const fileName = document.fileName;
+            const fileContent = document.getText();
+            const contentHash = generateHash(fileContent);
+            
+            // Only rescan if content changed
+            if (fileHashes.get(fileName) !== contentHash) {
+                await scanDocument(document);
+                scannedFiles.add(fileName);
+                fileHashes.set(fileName, contentHash);
+            }
         }
     });
 
-    // Auto-scan on file open
+    // Auto-scan on file open (disabled by default to prevent duplicate scans)
     const onOpenListener = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-        if (editor && shouldScanDocument(editor.document)) {
-            await scanDocument(editor.document);
+        if (editor) {
+            const config = vscode.workspace.getConfiguration('aiSecurityScanner');
+            const fileName = editor.document.fileName;
+            
+            // Only scan if explicitly enabled and file hasn't been scanned
+            if (config.get<boolean>('scanOnOpen') && 
+                !scannedFiles.has(fileName) && 
+                shouldScanDocument(editor.document)) {
+                await scanDocument(editor.document);
+                scannedFiles.add(fileName);
+                fileHashes.set(fileName, generateHash(editor.document.getText()));
+            }
         }
     });
 
@@ -153,6 +265,7 @@ export function activate(context: vscode.ExtensionContext) {
         declineRecommendationCommand,
         learnMoreCommand,
         demoUICommand,
+        clearCacheCommand,
         codeActionProvider,
         diagnosticCollection,
         statusBarItem,
@@ -169,29 +282,68 @@ export function activate(context: vscode.ExtensionContext) {
 /**
  * Scan the current file for vulnerabilities
  */
-async function scanCurrentFile() {
+async function scanCurrentFile(force: boolean = false) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
         vscode.window.setStatusBarMessage('⚠️ No active file to scan', 3000);
         return;
     }
 
+    const fileName = editor.document.fileName;
+    const fileContent = editor.document.getText();
+    const contentHash = generateHash(fileContent);
+    
+    // Check if file has already been scanned with same content
+    if (!force && scannedFiles.has(fileName) && fileHashes.get(fileName) === contentHash) {
+        vscode.window.setStatusBarMessage('✓ File already scanned', 2000);
+        return;
+    }
+    
+    // Prevent concurrent scans
+    if (isScanning) {
+        vscode.window.setStatusBarMessage('⏳ Scan already in progress...', 2000);
+        return;
+    }
+
     filesScannedCount++;
     await scanDocument(editor.document);
+    
+    // Mark file as scanned
+    scannedFiles.add(fileName);
+    fileHashes.set(fileName, contentHash);
+}
+
+/**
+ * Generate hash for content comparison
+ */
+function generateHash(content: string): string {
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+        const char = content.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString();
 }
 
 /**
  * Scan a document for vulnerabilities
  */
 async function scanDocument(document: vscode.TextDocument) {
+    if (isScanning) {
+        return;
+    }
+    
+    isScanning = true;
     outputChannel.appendLine(`\n🔍 Scanning ${document.fileName}...`);
     
-    // Show progress
-    await vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: 'Scanning for security vulnerabilities...',
-        cancellable: false
-    }, async (progress) => {
+    try {
+        // Show progress
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'Scanning for security vulnerabilities...',
+            cancellable: false
+        }, async (progress) => {
         progress.report({ increment: 20, message: 'Analyzing code patterns...' });
         
         // Scan for vulnerabilities
@@ -215,12 +367,39 @@ async function scanDocument(document: vscode.TextDocument) {
         
         progress.report({ increment: 10, message: 'Complete!' });
         
+        // Store recommendations globally with vulnerability data for accept button
+        currentRecommendations = recommendations.map((rec, index) => {
+            const vuln = vulnerabilities[index];
+            return {
+                ...rec,
+                vulnerability: {
+                    ...vuln,
+                    // Ensure we have the actual code line
+                    code: vuln.code || document.lineAt(Math.max(0, vuln.line - 1)).text,
+                    line: vuln.line,
+                    column: vuln.column || 1,
+                    type: vuln.type,
+                    message: vuln.message,
+                    severity: vuln.severity,
+                    recommendation: vuln.recommendation,
+                    educationalContent: vuln.educationalContent,
+                    automaticFix: vuln.automaticFix
+                }
+            };
+        });
+        
         // Show summary
         showScanSummary(vulnerabilities, recommendations);
         
         // Update security panel if open
         SecurityPanelProvider.update(vulnerabilities, recommendations);
-    });
+        });
+    } catch (error) {
+        console.error('Scan error:', error);
+        vscode.window.showErrorMessage(`Scan failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+        isScanning = false;
+    }
 }
 
 /**
@@ -373,8 +552,8 @@ function showScanSummary(vulnerabilities: Vulnerability[], recommendations: any[
     // Update status bar and sidebar
     vscode.window.setStatusBarMessage(`🔍 ${message}`, 5000);
     
-    // Store recommendations globally
-    currentRecommendations = recommendations;
+    // Don't overwrite currentRecommendations here - it's already set properly in scanDocument
+    // currentRecommendations = recommendations; // REMOVED - this was overwriting the good data
     
     // Update sidebar
     if (sidebarProvider) {
@@ -582,12 +761,29 @@ function showDemoRecommendations() {
         demoRecommendations
     );
 
-    // Store recommendations globally
+    // Store recommendations globally with proper vulnerability structure
     currentRecommendations = demoRecommendations.map((rec, index) => ({
-        ...rec,
-        currentCode: getExampleCode(rec.type, 'before'),
-        fixedCode: getExampleCode(rec.type, 'after'),
-        explanation: getExplanation(rec.type)
+        vulnerabilityId: `demo-${index}`,
+        vulnerability: {
+            id: `demo-${index}`,
+            type: rec.type,
+            severity: rec.severity,
+            line: rec.line,
+            column: rec.column || 1,
+            message: rec.message,
+            code: getExampleCode(rec.type, 'before'),
+            recommendation: rec.suggestion,
+            educationalContent: getExplanation(rec.type),
+            automaticFix: getExampleCode(rec.type, 'after'),
+            file: editor.document.fileName
+        },
+        automaticFix: getExampleCode(rec.type, 'after'),
+        explanation: getExplanation(rec.type),
+        bestPractices: [`Always validate input`, `Use secure coding practices`],
+        alternativeSolutions: [`Consider using a security library`],
+        estimatedFixTime: 10,
+        confidence: 90,
+        learningResources: []
     }));
     
     // Update sidebar with stats and scan results

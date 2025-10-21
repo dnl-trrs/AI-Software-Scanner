@@ -1,9 +1,11 @@
 /**
  * Core Security Scanner Module
- * Detects vulnerabilities in code and provides actionable recommendations
+ * Detects vulnerabilities in code using ChatGPT API
  */
 
 import * as vscode from 'vscode';
+import { OpenAIClient, SecurityIssue } from '../ai/OpenAIClient';
+import { RateLimiter, ScanCache, CodeChunker } from '../utils/RateLimiter';
 
 export interface Vulnerability {
     id: string;
@@ -35,192 +37,204 @@ export enum VulnerabilityType {
 }
 
 export class SecurityScanner {
+    private openaiClient: OpenAIClient | null = null;
     private vulnerabilities: Vulnerability[] = [];
-    private patterns: Map<VulnerabilityType, RegExp[]> = new Map();
-
-    constructor() {
-        this.initializePatterns();
+    private rateLimiter: RateLimiter;
+    private cache: ScanCache<Vulnerability[]>;
+    private chunker: CodeChunker;
+    
+    constructor(apiKey?: string) {
+        if (apiKey) {
+            // Explicitly use gpt-3.5-turbo for cost efficiency
+            const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+            this.openaiClient = new OpenAIClient(apiKey, model);
+            console.log(`SecurityScanner using model: ${model}`);
+        }
+        this.rateLimiter = new RateLimiter(20, 1000); // 20 requests per minute
+        this.cache = new ScanCache(3600000); // 1 hour cache
+        this.chunker = new CodeChunker(2000); // 2000 tokens per chunk
     }
 
-    /**
-     * Initialize vulnerability detection patterns
-     * These patterns identify common security issues
-     */
-    private initializePatterns(): void {
-        // SQL Injection patterns
-        this.patterns.set(VulnerabilityType.SQL_INJECTION, [
-            /query\s*\(\s*['"`].*\+.*\$\{.*\}/gi,
-            /query\s*\(\s*['"`].*\+.*\w+.*['"`]\s*\)/gi,
-            /execute\s*\(\s*['"`].*\+.*\$\{.*\}/gi,
-            /SELECT.*FROM.*WHERE.*['"`]\s*\+/gi,
-            /INSERT\s+INTO.*VALUES.*\+.*\$\{/gi
-        ]);
-
-        // XSS patterns
-        this.patterns.set(VulnerabilityType.XSS, [
-            /innerHTML\s*=\s*[^'"`].*\$\{/gi,
-            /document\.write\s*\(.*\$\{/gi,
-            /\$\{.*\}.*<\/script>/gi,
-            /dangerouslySetInnerHTML/gi,
-            /v-html\s*=/gi  // Vue.js XSS
-        ]);
-
-        // Path Traversal patterns
-        this.patterns.set(VulnerabilityType.PATH_TRAVERSAL, [
-            /readFile.*\+.*req\./gi,
-            /readFileSync.*\+.*req\./gi,
-            /path\.join\(.*req\./gi,
-            /\.\.\/\.\.\//g
-        ]);
-
-        // Hardcoded secrets patterns
-        this.patterns.set(VulnerabilityType.HARDCODED_SECRET, [
-            /api[_-]?key\s*[:=]\s*['"`][A-Za-z0-9+/]{20,}/gi,
-            /secret\s*[:=]\s*['"`][A-Za-z0-9+/]{20,}/gi,
-            /password\s*[:=]\s*['"`].{8,}/gi,
-            /token\s*[:=]\s*['"`][A-Za-z0-9+/]{20,}/gi,
-            /private[_-]?key\s*[:=]\s*['"`]/gi
-        ]);
-
-        // Weak Cryptography patterns
-        this.patterns.set(VulnerabilityType.WEAK_CRYPTO, [
-            /createHash\s*\(\s*['"`]md5/gi,
-            /createHash\s*\(\s*['"`]sha1/gi,
-            /crypto\.createCipher\s*\(/gi,  // Deprecated weak cipher
-            /Math\.random\s*\(\s*\).*password/gi,
-            /Math\.random\s*\(\s*\).*token/gi
-        ]);
-
-        // Command Injection patterns
-        this.patterns.set(VulnerabilityType.COMMAND_INJECTION, [
-            /exec\s*\(.*\$\{/gi,
-            /execSync\s*\(.*\+/gi,
-            /spawn\s*\(.*\$\{/gi,
-            /eval\s*\(.*req\./gi,
-            /Function\s*\(.*req\./gi
-        ]);
-    }
 
     /**
-     * Scan a file for vulnerabilities
+     * Scan a file for vulnerabilities using ChatGPT
      */
     public async scanFile(document: vscode.TextDocument): Promise<Vulnerability[]> {
+        if (!this.openaiClient) {
+            vscode.window.showWarningMessage('OpenAI API key not configured. Using pattern-based detection.');
+            return this.fallbackScan(document);
+        }
+        
         const text = document.getText();
-        const lines = text.split('\n');
-        const detectedVulnerabilities: Vulnerability[] = [];
-
-        // Scan for each vulnerability type
-        for (const [vulnType, patterns] of this.patterns) {
-            for (const pattern of patterns) {
-                const matches = this.findMatches(text, pattern);
-                
-                for (const match of matches) {
-                    const position = this.getPositionFromOffset(lines, match.index);
-                    
-                    const vulnerability: Vulnerability = {
-                        id: this.generateId(),
-                        type: vulnType,
-                        severity: this.calculateSeverity(vulnType),
-                        line: position.line,
-                        column: position.column,
-                        message: this.getVulnerabilityMessage(vulnType),
-                        file: document.fileName,
-                        code: match.match,
-                        recommendation: this.getRecommendation(vulnType),
-                        educationalContent: this.getEducationalContent(vulnType)
-                    };
-
-                    detectedVulnerabilities.push(vulnerability);
-                }
+        const language = document.languageId;
+        
+        // Check cache first
+        const cached = this.cache.get(text);
+        if (cached) {
+            this.vulnerabilities = cached;
+            return cached;
+        }
+        
+        // Split into chunks if needed
+        const chunks = this.chunker.splitIntoChunks(text);
+        const allVulnerabilities: Vulnerability[] = [];
+        
+        // Scan each chunk with rate limiting
+        for (let i = 0; i < chunks.length; i++) {
+            await this.rateLimiter.waitIfNeeded();
+            
+            try {
+                const issues = await this.openaiClient.analyzeCodeSecurity(chunks[i], language);
+                const vulnerabilities = await this.convertToVulnerabilities(issues, document, i, chunks.length);
+                allVulnerabilities.push(...vulnerabilities);
+            } catch (error) {
+                console.error(`Failed to scan chunk ${i + 1}:`, error);
             }
         }
-
-        this.vulnerabilities = detectedVulnerabilities;
-        return detectedVulnerabilities;
+        
+        // Cache the results
+        this.cache.set(text, allVulnerabilities);
+        this.vulnerabilities = allVulnerabilities;
+        
+        return allVulnerabilities;
     }
-
+    
     /**
-     * Find all matches for a pattern in text
+     * Convert OpenAI issues to Vulnerability format
      */
-    private findMatches(text: string, pattern: RegExp): Array<{match: string, index: number}> {
-        const matches: Array<{match: string, index: number}> = [];
+    private async convertToVulnerabilities(
+        issues: SecurityIssue[], 
+        document: vscode.TextDocument, 
+        chunkIndex: number, 
+        totalChunks: number
+    ): Promise<Vulnerability[]> {
+        const vulnerabilities: Vulnerability[] = [];
+        
+        for (const issue of issues) {
+            // Get educational content asynchronously
+            const educational = issue.educational || 
+                await this.openaiClient?.getEducationalContent(issue.type) || 
+                this.getEducationalContent(this.mapToVulnerabilityType(issue.type));
+            
+            // Ensure line number is valid
+            const lineNumber = typeof issue.line === 'number' ? issue.line : 1;
+            const codeAtLine = this.getCodeAtLine(document, lineNumber);
+            
+            const vulnerability: Vulnerability = {
+                id: this.generateId(),
+                type: this.mapToVulnerabilityType(issue.type),
+                severity: issue.severity,
+                line: lineNumber,
+                column: issue.column || 1,
+                message: issue.description || `${issue.type} detected`,
+                file: document.fileName,
+                code: codeAtLine || `Line ${lineNumber}: ${issue.type}`,
+                recommendation: issue.fix || this.getRecommendation(this.mapToVulnerabilityType(issue.type)),
+                educationalContent: educational,
+                automaticFix: issue.fix || '// Apply security fix here'
+            };
+            
+            vulnerabilities.push(vulnerability);
+        }
+        
+        return vulnerabilities;
+    }
+    
+    /**
+     * Map string type to VulnerabilityType enum
+     */
+    private mapToVulnerabilityType(type: string): VulnerabilityType {
+        const typeMap: Record<string, VulnerabilityType> = {
+            'SQL Injection': VulnerabilityType.SQL_INJECTION,
+            'XSS': VulnerabilityType.XSS,
+            'Cross-Site Scripting': VulnerabilityType.XSS,
+            'Path Traversal': VulnerabilityType.PATH_TRAVERSAL,
+            'Command Injection': VulnerabilityType.COMMAND_INJECTION,
+            'Hardcoded Secret': VulnerabilityType.HARDCODED_SECRET,
+            'Weak Cryptography': VulnerabilityType.WEAK_CRYPTO,
+            'XXE': VulnerabilityType.XXE,
+            'Insecure Deserialization': VulnerabilityType.INSECURE_DESERIALIZATION,
+            'Sensitive Data Exposure': VulnerabilityType.SENSITIVE_DATA_EXPOSURE
+        };
+        
+        // Try exact match first
+        if (typeMap[type]) {
+            return typeMap[type];
+        }
+        
+        // Try case-insensitive match
+        const lowerType = type.toLowerCase();
+        for (const [key, value] of Object.entries(typeMap)) {
+            if (key.toLowerCase() === lowerType) {
+                return value;
+            }
+        }
+        
+        // Default to sensitive data exposure for unknown types
+        return VulnerabilityType.SENSITIVE_DATA_EXPOSURE;
+    }
+    
+    /**
+     * Get code at specific line
+     */
+    private getCodeAtLine(document: vscode.TextDocument, line: number): string {
+        try {
+            // Ensure line number is valid (1-based to 0-based conversion)
+            const actualLine = Math.max(0, Math.min(document.lineCount - 1, line - 1));
+            const textLine = document.lineAt(actualLine);
+            return textLine.text.trim();
+        } catch (error) {
+            console.error(`Failed to get code at line ${line}:`, error);
+            // Try to get some context around the line
+            try {
+                const startLine = Math.max(0, line - 2);
+                const endLine = Math.min(document.lineCount - 1, line);
+                let code = '';
+                for (let i = startLine; i <= endLine; i++) {
+                    code += document.lineAt(i).text + '\n';
+                }
+                return code.trim();
+            } catch {
+                return 'Unable to retrieve code';
+            }
+        }
+    }
+    
+    /**
+     * Fallback to pattern-based scanning when API is not available
+     */
+    private fallbackScan(document: vscode.TextDocument): Vulnerability[] {
+        // Basic pattern-based detection as fallback
+        const text = document.getText();
+        const vulnerabilities: Vulnerability[] = [];
+        
+        // Simple SQL injection check
+        const sqlPattern = /query\s*\(.*\+.*['"`]/gi;
         let match;
-
-        // Reset the pattern lastIndex
-        pattern.lastIndex = 0;
-
-        while ((match = pattern.exec(text)) !== null) {
-            matches.push({
-                match: match[0],
-                index: match.index
+        while ((match = sqlPattern.exec(text)) !== null) {
+            vulnerabilities.push({
+                id: this.generateId(),
+                type: VulnerabilityType.SQL_INJECTION,
+                severity: 'high',
+                line: this.getLineFromOffset(text, match.index),
+                column: 1,
+                message: 'Potential SQL injection detected',
+                file: document.fileName,
+                code: match[0],
+                recommendation: 'Use parameterized queries',
+                educationalContent: this.getEducationalContent(VulnerabilityType.SQL_INJECTION)
             });
         }
-
-        return matches;
-    }
-
-    /**
-     * Convert text offset to line and column
-     */
-    private getPositionFromOffset(lines: string[], offset: number): {line: number, column: number} {
-        let currentOffset = 0;
         
-        for (let i = 0; i < lines.length; i++) {
-            if (currentOffset + lines[i].length >= offset) {
-                return {
-                    line: i + 1,
-                    column: offset - currentOffset + 1
-                };
-            }
-            currentOffset += lines[i].length + 1; // +1 for newline
-        }
-
-        return { line: 1, column: 1 };
+        return vulnerabilities;
     }
-
+    
     /**
-     * Calculate severity based on vulnerability type
+     * Get line number from text offset
      */
-    private calculateSeverity(type: VulnerabilityType): 'low' | 'medium' | 'high' | 'critical' {
-        switch (type) {
-            case VulnerabilityType.SQL_INJECTION:
-            case VulnerabilityType.COMMAND_INJECTION:
-            case VulnerabilityType.PATH_TRAVERSAL:
-                return 'critical';
-            
-            case VulnerabilityType.XSS:
-            case VulnerabilityType.XXE:
-            case VulnerabilityType.INSECURE_DESERIALIZATION:
-                return 'high';
-            
-            case VulnerabilityType.HARDCODED_SECRET:
-            case VulnerabilityType.WEAK_CRYPTO:
-            case VulnerabilityType.SENSITIVE_DATA_EXPOSURE:
-                return 'medium';
-            
-            default:
-                return 'low';
-        }
-    }
-
-    /**
-     * Get descriptive message for vulnerability type
-     */
-    private getVulnerabilityMessage(type: VulnerabilityType): string {
-        const messages: Record<VulnerabilityType, string> = {
-            [VulnerabilityType.SQL_INJECTION]: 'Potential SQL injection vulnerability detected. User input is being concatenated directly into SQL query.',
-            [VulnerabilityType.XSS]: 'Cross-site scripting vulnerability detected. User input is being rendered without proper sanitization.',
-            [VulnerabilityType.PATH_TRAVERSAL]: 'Path traversal vulnerability detected. User input is being used to construct file paths.',
-            [VulnerabilityType.INSECURE_RANDOM]: 'Insecure random number generation detected. Math.random() is not cryptographically secure.',
-            [VulnerabilityType.HARDCODED_SECRET]: 'Hardcoded secret/credential detected. Sensitive information should be stored in environment variables.',
-            [VulnerabilityType.WEAK_CRYPTO]: 'Weak cryptographic algorithm detected. Use stronger algorithms like SHA-256 or SHA-512.',
-            [VulnerabilityType.COMMAND_INJECTION]: 'Command injection vulnerability detected. User input is being passed to system commands.',
-            [VulnerabilityType.XXE]: 'XML External Entity vulnerability detected. XML parsing is vulnerable to XXE attacks.',
-            [VulnerabilityType.INSECURE_DESERIALIZATION]: 'Insecure deserialization detected. Untrusted data is being deserialized.',
-            [VulnerabilityType.SENSITIVE_DATA_EXPOSURE]: 'Sensitive data exposure detected. Sensitive information may be logged or transmitted insecurely.'
-        };
-
-        return messages[type] || 'Security vulnerability detected.';
+    private getLineFromOffset(text: string, offset: number): number {
+        const lines = text.substring(0, offset).split('\n');
+        return lines.length;
     }
 
     /**
