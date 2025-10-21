@@ -10,6 +10,16 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "aiSoftwareScannerResults",
+          "name": "AI Software Scanner",
+          "icon": "$(shield)",
+          "contextualTitle": "AI Software Scanner Results"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "ai-software-scanner.scanFile",
@@ -35,10 +45,44 @@
     "configuration": {
       "title": "AI Software Scanner",
       "properties": {
+        "aiSoftwareScanner.aiProvider": {
+          "type": "string",
+          "default": "openai",
+          "enum": ["openai", "anthropic", "local"],
+          "description": "AI provider to use for code analysis"
+        },
+        "aiSoftwareScanner.fallbackProvider": {
+          "type": "string",
+          "enum": ["openai", "anthropic", "local", "none"],
+          "default": "none",
+          "description": "Fallback AI provider to use if primary provider fails"
+        },
         "aiSoftwareScanner.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API key for AI service"
+          "description": "API key for the primary AI service"
+        },
+        "aiSoftwareScanner.fallbackApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the fallback AI service"
+        },
+        "aiSoftwareScanner.maxRequestsPerMinute": {
+          "type": "number",
+          "default": 20,
+          "description": "Maximum number of AI requests per minute"
+        },
+        "aiSoftwareScanner.maxTokens": {
+          "type": "number",
+          "default": 2000,
+          "description": "Maximum number of tokens to use in AI requests"
+        },
+        "aiSoftwareScanner.temperature": {
+          "type": "number",
+          "default": 0.3,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "AI response temperature (0-2). Lower values are more focused/deterministic"
         }
       }
     }
