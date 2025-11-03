@@ -44,30 +44,54 @@ async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, f
     await editor.edit((editBuilder) => {
         const startLine = vulnerability.line - 1; // Convert to 0-based
         
-        // Handle multi-line fixes
-        const fixLines = fix.split('\n');
-        const vulnerableCodeLines = vulnerability.code ? vulnerability.code.split('\n') : [];
-        const linesToReplace = Math.max(1, vulnerableCodeLines.length);
+        // Clean the fix string - remove explanatory comments and extract just the code
+        let cleanedFix = extractActualCode(fix);
         
-        // Calculate the range to replace
-        let endLine = startLine + linesToReplace - 1;
-        
-        // Ensure we don't go beyond document bounds
-        endLine = Math.min(endLine, editor.document.lineCount - 1);
-        
-        // Get the indentation from the first line
-        const firstLineText = editor.document.lineAt(startLine).text;
-        const indentMatch = firstLineText.match(/^(\s*)/);
+        // Get the original line to determine context
+        const originalLine = editor.document.lineAt(startLine).text;
+        const indentMatch = originalLine.match(/^(\s*)/);
         const indentation = indentMatch ? indentMatch[1] : '';
         
-        // Apply indentation to all fix lines except the first (which should preserve original indentation)
-        const indentedFix = fixLines.map((line, index) => {
-            if (index === 0) {
-                // For the first line, try to preserve existing indentation if the fix doesn't have it
-                return line.startsWith(' ') || line.startsWith('\t') ? line : indentation + line;
+        // Determine how many lines to replace based on the vulnerability
+        let linesToReplace = 1;
+        if (vulnerability.endLine) {
+            linesToReplace = vulnerability.endLine - vulnerability.line + 1;
+        } else if (vulnerability.code) {
+            // Count lines in the vulnerable code
+            linesToReplace = vulnerability.code.split('\n').length;
+        }
+        
+        // Calculate the range to replace
+        let endLine = Math.min(startLine + linesToReplace - 1, editor.document.lineCount - 1);
+        
+        // Process the cleaned fix
+        const fixLines = cleanedFix.split('\n');
+        const processedFix = fixLines.map((line, index) => {
+            // Skip empty lines at the beginning and end
+            if ((index === 0 || index === fixLines.length - 1) && line.trim() === '') {
+                return '';
             }
-            // For subsequent lines, add indentation if they have content
-            return line.length > 0 ? indentation + line : line;
+            // For the first line with content, preserve original indentation
+            if (index === 0) {
+                return line.startsWith(' ') || line.startsWith('\t') ? line : indentation + line.trim();
+            }
+            // For other lines, maintain relative indentation
+            if (line.trim().length > 0) {
+                // Check if this line needs additional indentation (e.g., inside a block)
+                const leadingSpaces = line.match(/^(\s*)/);
+                const relativeIndent = leadingSpaces ? leadingSpaces[1] : '';
+                if (relativeIndent.length > 0) {
+                    return indentation + line.trim();
+                }
+                return indentation + line.trim();
+            }
+            return line;
+        }).filter((line, index) => {
+            // Remove leading and trailing empty lines
+            if (index === 0 || index === fixLines.length - 1) {
+                return line.trim().length > 0;
+            }
+            return true;
         }).join('\n');
         
         const range = new vscode.Range(
@@ -76,12 +100,74 @@ async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, f
         );
         
         // Replace the vulnerable code with the fix
-        editBuilder.replace(range, indentedFix);
+        editBuilder.replace(range, processedFix);
     });
     
-    // Optionally, reveal the fixed line
+    // Reveal the fixed line
     const revealRange = new vscode.Range(vulnerability.line - 1, 0, vulnerability.line - 1, 0);
     editor.revealRange(revealRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
+// Helper function to extract actual code from fix suggestions
+function extractActualCode(fix: string): string {
+    // Remove common explanation patterns
+    let cleaned = fix;
+    
+    // Remove lines that are clearly comments or explanations
+    const lines = cleaned.split('\n');
+    const codeLines = lines.filter(line => {
+        const trimmed = line.trim();
+        // Skip lines that are clearly explanatory
+        if (trimmed.startsWith('//') && (
+            trimmed.includes('Use ') ||
+            trimmed.includes('Instead of') ||
+            trimmed.includes('Replace ') ||
+            trimmed.includes('Change ') ||
+            trimmed.includes('Move ') ||
+            trimmed.includes('Add ') ||
+            trimmed.includes('Create ') ||
+            trimmed.includes('Don\'t ') ||
+            trimmed.includes('GOOD:') ||
+            trimmed.includes('BAD:') ||
+            trimmed.includes('Example:') ||
+            trimmed.includes('Note:')
+        )) {
+            return false;
+        }
+        // Skip numbered instructions
+        if (/^\d+\.\s/.test(trimmed)) {
+            return false;
+        }
+        // Skip import suggestions that are explanatory
+        if (trimmed.startsWith('import') && trimmed.includes('//')) {
+            // Keep the import but remove the comment
+            return true;
+        }
+        return true;
+    });
+    
+    // Join the filtered lines
+    cleaned = codeLines.join('\n');
+    
+    // Remove inline comments that are explanatory
+    cleaned = cleaned.replace(/\/\/.*?(instead|rather than|not|don't|avoid|use|replace).*/gi, '');
+    
+    // Extract code blocks if the fix contains markdown-style code blocks
+    const codeBlockMatch = cleaned.match(/```[\w]*\n([\s\S]*?)```/);
+    if (codeBlockMatch) {
+        cleaned = codeBlockMatch[1];
+    }
+    
+    // Remove require/import statements that are followed by config examples
+    cleaned = cleaned.replace(/require\(['"]dotenv['"]\)\.config\(\);[\s\S]*?(?=\n[^\s])/g, '');
+    
+    // Clean up any remaining explanation text
+    const finalLines = cleaned.split('\n').map(line => {
+        // Remove inline comments at the end of lines
+        return line.replace(/\s*\/\/\s*(Safe|Fixed|Secure|Better|Correct|This is).*/i, '');
+    }).filter(line => line.trim().length > 0);
+    
+    return finalLines.join('\n');
 }
 
 // Helper function to update UI after fix is applied
@@ -291,38 +377,17 @@ export function activate(context: vscode.ExtensionContext) {
         }
     );
 
-    // Auto-scan on file save
+    // Auto-scan listeners - DISABLED by default
+    // Only scan when explicitly triggered from sidebar button
     const onSaveListener = vscode.workspace.onDidSaveTextDocument(async (document) => {
-        const config = vscode.workspace.getConfiguration('aiSecurityScanner');
-        if (config.get<boolean>('scanOnSave') && shouldScanDocument(document)) {
-            const fileName = document.fileName;
-            const fileContent = document.getText();
-            const contentHash = generateHash(fileContent);
-            
-            // Only rescan if content changed
-            if (fileHashes.get(fileName) !== contentHash) {
-                await scanDocument(document);
-                scannedFiles.add(fileName);
-                fileHashes.set(fileName, contentHash);
-            }
-        }
+        // Disabled - only scan via sidebar button
+        // Keeping listener structure for potential future use
     });
 
-    // Auto-scan on file open (disabled by default to prevent duplicate scans)
+    // Auto-scan on file open - DISABLED
     const onOpenListener = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-        if (editor) {
-            const config = vscode.workspace.getConfiguration('aiSecurityScanner');
-            const fileName = editor.document.fileName;
-            
-            // Only scan if explicitly enabled and file hasn't been scanned
-            if (config.get<boolean>('scanOnOpen') && 
-                !scannedFiles.has(fileName) && 
-                shouldScanDocument(editor.document)) {
-                await scanDocument(editor.document);
-                scannedFiles.add(fileName);
-                fileHashes.set(fileName, generateHash(editor.document.getText()));
-            }
-        }
+        // Disabled - only scan via sidebar button
+        // Keeping listener structure for potential future use
     });
 
     // Add to subscriptions
