@@ -39,6 +39,69 @@ let scannedFiles = new Set<string>();
 let fileHashes = new Map<string, string>();
 let isScanning = false;
 
+// Helper function to apply fix to a specific editor
+async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, fix: string) {
+    await editor.edit((editBuilder) => {
+        const startLine = vulnerability.line - 1; // Convert to 0-based
+        
+        // Handle multi-line fixes
+        const fixLines = fix.split('\n');
+        const vulnerableCodeLines = vulnerability.code ? vulnerability.code.split('\n') : [];
+        const linesToReplace = Math.max(1, vulnerableCodeLines.length);
+        
+        // Calculate the range to replace
+        let endLine = startLine + linesToReplace - 1;
+        
+        // Ensure we don't go beyond document bounds
+        endLine = Math.min(endLine, editor.document.lineCount - 1);
+        
+        // Get the indentation from the first line
+        const firstLineText = editor.document.lineAt(startLine).text;
+        const indentMatch = firstLineText.match(/^(\s*)/);
+        const indentation = indentMatch ? indentMatch[1] : '';
+        
+        // Apply indentation to all fix lines except the first (which should preserve original indentation)
+        const indentedFix = fixLines.map((line, index) => {
+            if (index === 0) {
+                // For the first line, try to preserve existing indentation if the fix doesn't have it
+                return line.startsWith(' ') || line.startsWith('\t') ? line : indentation + line;
+            }
+            // For subsequent lines, add indentation if they have content
+            return line.length > 0 ? indentation + line : line;
+        }).join('\n');
+        
+        const range = new vscode.Range(
+            startLine, 0,
+            endLine, editor.document.lineAt(endLine).text.length
+        );
+        
+        // Replace the vulnerable code with the fix
+        editBuilder.replace(range, indentedFix);
+    });
+    
+    // Optionally, reveal the fixed line
+    const revealRange = new vscode.Range(vulnerability.line - 1, 0, vulnerability.line - 1, 0);
+    editor.revealRange(revealRange, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
+// Helper function to update UI after fix is applied
+function updateAfterFix(vulnerability: any) {
+    // Update sidebar stats
+    if (sidebarProvider) {
+        sidebarProvider.updateStats({
+            recommendationsCount: currentRecommendations.length - acceptedCount,
+            issuesFixed: acceptedCount,
+            filesScanned: filesScannedCount
+        });
+    }
+    
+    // Show temporary status message
+    vscode.window.setStatusBarMessage(`✅ Fix applied (${acceptedCount} fixed so far)`, 3000);
+    
+    // Remove from current recommendations
+    currentRecommendations = currentRecommendations.filter(r => r.vulnerabilityId !== vulnerability.id);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('🔒 AI Software Security Scanner is now active!');
 
@@ -155,35 +218,30 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
             
-            // Apply the fix to the document
-            await editor.edit((editBuilder) => {
-                const line = vulnerability.line - 1; // Convert to 0-based
-                const lineText = editor.document.lineAt(line);
-                const range = new vscode.Range(
-                    line, 0,
-                    line, lineText.text.length
-                );
+            // Ensure we're in the correct file if a file path is provided
+            if (vulnerability.file) {
+                const vulnerabilityFilePath = vscode.Uri.file(vulnerability.file).fsPath;
+                const editorFilePath = editor.document.uri.fsPath;
                 
-                // Replace the vulnerable line with the fix
-                editBuilder.replace(range, fix);
-            });
-            
-            acceptedCount++;
-            
-            // Update sidebar stats
-            if (sidebarProvider) {
-                sidebarProvider.updateStats({
-                    recommendationsCount: currentRecommendations.length - acceptedCount,
-                    issuesFixed: acceptedCount,
-                    filesScanned: filesScannedCount
-                });
+                if (vulnerabilityFilePath !== editorFilePath) {
+                    // Open the correct file
+                    const document = await vscode.workspace.openTextDocument(vulnerability.file);
+                    const newEditor = await vscode.window.showTextDocument(document);
+                    
+                    // Apply fix in the correct file
+                    await applyFixToEditor(newEditor, vulnerability, fix);
+                    acceptedCount++;
+                    updateAfterFix(vulnerability);
+                    return;
+                }
             }
             
-            // Show temporary status message
-            vscode.window.setStatusBarMessage(`✅ Fix applied (${acceptedCount} fixed so far)`, 3000);
+            // Apply the fix to the current editor
+            await applyFixToEditor(editor, vulnerability, fix);
             
-            // Remove from current recommendations
-            currentRecommendations = currentRecommendations.filter(r => r.vulnerabilityId !== vulnerability.id);
+            acceptedCount++;
+            updateAfterFix(vulnerability);
+            
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to apply fix: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
