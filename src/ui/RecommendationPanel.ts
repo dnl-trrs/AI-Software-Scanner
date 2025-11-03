@@ -100,6 +100,15 @@ export class RecommendationPanel {
         );
     }
 
+    public updateRecommendations(recommendations: any[]) {
+        this._recommendations = recommendations;
+        // Maintain current index if valid, otherwise reset
+        if (this._currentIndex >= this._recommendations.length) {
+            this._currentIndex = Math.max(0, this._recommendations.length - 1);
+        }
+        this._update();
+    }
+
     public dispose() {
         RecommendationPanel.currentPanel = undefined;
 

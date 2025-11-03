@@ -33,6 +33,8 @@ let recommendationDecorator: RecommendationDecorator;
 let currentRecommendations: any[] = [];
 let acceptedCount: number = 0;
 let filesScannedCount: number = 0;
+// Track line adjustments for each file after fixes are applied
+let lineAdjustments: Map<string, number[]> = new Map();
 
 // Track scanned files to prevent duplicate scans
 let scannedFiles = new Set<string>();
@@ -41,58 +43,117 @@ let isScanning = false;
 
 // Helper function to apply fix to a specific editor
 async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, fix: string) {
+    const fileName = editor.document.fileName;
+    const originalLineCount = editor.document.lineCount;
+    
     await editor.edit((editBuilder) => {
-        const startLine = vulnerability.line - 1; // Convert to 0-based
+        // Apply line adjustments from previous fixes in this file
+        let adjustedLine = vulnerability.line;
+        const fileAdjustments = lineAdjustments.get(fileName) || [];
+        for (const adjustment of fileAdjustments) {
+            if (adjustment < vulnerability.line) {
+                adjustedLine += adjustment;
+            }
+        }
+        
+        const startLine = adjustedLine - 1; // Convert to 0-based
         
         // Clean the fix string - remove explanatory comments and extract just the code
         let cleanedFix = extractActualCode(fix);
         
-        // Get the original line to determine context
+        // Get the original line and its indentation
         const originalLine = editor.document.lineAt(startLine).text;
-        const indentMatch = originalLine.match(/^(\s*)/);
-        const indentation = indentMatch ? indentMatch[1] : '';
+        const originalIndentMatch = originalLine.match(/^(\s*)/);
+        const originalIndentation = originalIndentMatch ? originalIndentMatch[1] : '';
         
-        // Determine how many lines to replace based on the vulnerability
+        // Determine how many lines to replace
         let linesToReplace = 1;
         if (vulnerability.endLine) {
             linesToReplace = vulnerability.endLine - vulnerability.line + 1;
         } else if (vulnerability.code) {
-            // Count lines in the vulnerable code
-            linesToReplace = vulnerability.code.split('\n').length;
+            // Count actual lines in the vulnerable code
+            const codeLines = vulnerability.code.split('\n');
+            linesToReplace = codeLines.length;
         }
         
-        // Calculate the range to replace
+        // Calculate the actual range to replace
         let endLine = Math.min(startLine + linesToReplace - 1, editor.document.lineCount - 1);
         
-        // Process the cleaned fix
+        // Split the fix into lines and process each one
         const fixLines = cleanedFix.split('\n');
-        const processedFix = fixLines.map((line, index) => {
-            // Skip empty lines at the beginning and end
-            if ((index === 0 || index === fixLines.length - 1) && line.trim() === '') {
-                return '';
+        
+        // Smart indentation: analyze the fix to maintain structure
+        const processedLines: string[] = [];
+        let baseIndentLevel = originalIndentation.length;
+        
+        for (let i = 0; i < fixLines.length; i++) {
+            const line = fixLines[i];
+            const trimmedLine = line.trim();
+            
+            if (trimmedLine.length === 0) {
+                // Keep empty lines
+                processedLines.push('');
+                continue;
             }
-            // For the first line with content, preserve original indentation
-            if (index === 0) {
-                return line.startsWith(' ') || line.startsWith('\t') ? line : indentation + line.trim();
-            }
-            // For other lines, maintain relative indentation
-            if (line.trim().length > 0) {
-                // Check if this line needs additional indentation (e.g., inside a block)
-                const leadingSpaces = line.match(/^(\s*)/);
-                const relativeIndent = leadingSpaces ? leadingSpaces[1] : '';
-                if (relativeIndent.length > 0) {
-                    return indentation + line.trim();
+            
+            // Detect the indentation level from the original fix
+            const fixLineIndentMatch = line.match(/^(\s*)/);
+            const fixLineIndent = fixLineIndentMatch ? fixLineIndentMatch[1].length : 0;
+            
+            // Calculate relative indentation from the first non-empty line
+            if (i === 0) {
+                // First line uses the original indentation
+                processedLines.push(originalIndentation + trimmedLine);
+            } else {
+                // For subsequent lines, check if they should be indented more
+                // Look for block indicators in the previous line
+                const prevLine = processedLines[processedLines.length - 1];
+                const prevTrimmed = prevLine.trim();
+                
+                // Check if previous line opens a block
+                const opensBlock = prevTrimmed.endsWith('{') || 
+                                  prevTrimmed.endsWith(':') || 
+                                  prevTrimmed.includes('=>') ||
+                                  prevTrimmed.startsWith('if ') ||
+                                  prevTrimmed.startsWith('for ') ||
+                                  prevTrimmed.startsWith('while ');
+                
+                // Check if current line closes a block
+                const closesBlock = trimmedLine.startsWith('}') || 
+                                   trimmedLine.startsWith(')');
+                
+                // Check if this line is a continuation (e.g., chained methods)
+                const isContinuation = trimmedLine.startsWith('.') || 
+                                      prevTrimmed.endsWith(',') ||
+                                      prevTrimmed.endsWith('+') ||
+                                      prevTrimmed.endsWith('||') ||
+                                      prevTrimmed.endsWith('&&');
+                
+                let indentToUse = originalIndentation;
+                
+                if (closesBlock) {
+                    // Same level as original
+                    indentToUse = originalIndentation;
+                } else if (opensBlock || isContinuation) {
+                    // Add one level of indentation
+                    const indentUnit = originalIndentation.includes('\t') ? '\t' : '    ';
+                    indentToUse = originalIndentation + indentUnit;
+                } else {
+                    // Check relative indentation in the original fix
+                    if (fixLineIndent > 0 && i > 0) {
+                        // This line was indented in the fix, maintain relative indent
+                        const indentUnit = originalIndentation.includes('\t') ? '\t' : '    ';
+                        indentToUse = originalIndentation + indentUnit;
+                    } else {
+                        indentToUse = originalIndentation;
+                    }
                 }
-                return indentation + line.trim();
+                
+                processedLines.push(indentToUse + trimmedLine);
             }
-            return line;
-        }).filter((line, index) => {
-            // Remove leading and trailing empty lines
-            if (index === 0 || index === fixLines.length - 1) {
-                return line.trim().length > 0;
-            }
-            return true;
-        }).join('\n');
+        }
+        
+        const processedFix = processedLines.join('\n');
         
         const range = new vscode.Range(
             startLine, 0,
@@ -102,6 +163,21 @@ async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, f
         // Replace the vulnerable code with the fix
         editBuilder.replace(range, processedFix);
     });
+    
+    // Calculate line adjustment after the edit
+    const newLineCount = editor.document.lineCount;
+    const lineChange = newLineCount - originalLineCount;
+    
+    // Store the adjustment for future fixes
+    if (lineChange !== 0) {
+        if (!lineAdjustments.has(fileName)) {
+            lineAdjustments.set(fileName, []);
+        }
+        lineAdjustments.get(fileName)!.push(lineChange);
+        
+        // Update remaining recommendations with new line numbers
+        updateRecommendationLineNumbers(fileName, vulnerability.line, lineChange);
+    }
     
     // Reveal the fixed line
     const revealRange = new vscode.Range(vulnerability.line - 1, 0, vulnerability.line - 1, 0);
@@ -168,6 +244,31 @@ function extractActualCode(fix: string): string {
     }).filter(line => line.trim().length > 0);
     
     return finalLines.join('\n');
+}
+
+// Helper function to update line numbers in remaining recommendations
+function updateRecommendationLineNumbers(fileName: string, fixedLine: number, lineChange: number) {
+    currentRecommendations = currentRecommendations.map(rec => {
+        if (rec.vulnerability && rec.vulnerability.file === fileName) {
+            // Only update if the vulnerability is after the fixed line
+            if (rec.vulnerability.line > fixedLine) {
+                return {
+                    ...rec,
+                    vulnerability: {
+                        ...rec.vulnerability,
+                        line: rec.vulnerability.line + lineChange,
+                        endLine: rec.vulnerability.endLine ? rec.vulnerability.endLine + lineChange : undefined
+                    }
+                };
+            }
+        }
+        return rec;
+    });
+    
+    // If the recommendation panel is open, update it
+    if (RecommendationPanel.currentPanel) {
+        RecommendationPanel.currentPanel.updateRecommendations(currentRecommendations);
+    }
 }
 
 // Helper function to update UI after fix is applied
@@ -473,6 +574,9 @@ async function scanDocument(document: vscode.TextDocument) {
     
     isScanning = true;
     outputChannel.appendLine(`\n🔍 Scanning ${document.fileName}...`);
+    
+    // Clear line adjustments for this file when starting a new scan
+    lineAdjustments.delete(document.fileName);
     
     try {
         // Show progress
