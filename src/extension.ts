@@ -204,12 +204,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     const acceptRecommendationCommand = vscode.commands.registerCommand('ai-software-scanner.acceptRecommendation', async (data: any) => {
         try {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage('No active editor to apply fix');
-                return;
-            }
-            
             // Get the vulnerability and fix from the data
             const { vulnerability, fix } = data;
             
@@ -218,26 +212,46 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
             
-            // Ensure we're in the correct file if a file path is provided
+            let targetEditor: vscode.TextEditor | undefined;
+            
+            // First, try to find the editor with the vulnerable file
             if (vulnerability.file) {
-                const vulnerabilityFilePath = vscode.Uri.file(vulnerability.file).fsPath;
-                const editorFilePath = editor.document.uri.fsPath;
+                // Try to find if the file is already open
+                const targetUri = vscode.Uri.file(vulnerability.file);
+                targetEditor = vscode.window.visibleTextEditors.find(
+                    editor => editor.document.uri.fsPath === targetUri.fsPath
+                );
                 
-                if (vulnerabilityFilePath !== editorFilePath) {
-                    // Open the correct file
-                    const document = await vscode.workspace.openTextDocument(vulnerability.file);
-                    const newEditor = await vscode.window.showTextDocument(document);
-                    
-                    // Apply fix in the correct file
-                    await applyFixToEditor(newEditor, vulnerability, fix);
-                    acceptedCount++;
-                    updateAfterFix(vulnerability);
+                if (!targetEditor) {
+                    // File not open, open it
+                    const document = await vscode.workspace.openTextDocument(targetUri);
+                    targetEditor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+                }
+            } else {
+                // No specific file specified, try to get the active editor
+                targetEditor = vscode.window.activeTextEditor;
+                
+                // If no active editor, try to get the first visible editor
+                if (!targetEditor && vscode.window.visibleTextEditors.length > 0) {
+                    targetEditor = vscode.window.visibleTextEditors[0];
+                    await vscode.window.showTextDocument(targetEditor.document, targetEditor.viewColumn);
+                }
+            }
+            
+            if (!targetEditor) {
+                // Last resort: try to open a file from the workspace
+                const files = await vscode.workspace.findFiles('**/*.{js,ts,jsx,tsx}', '**/node_modules/**', 1);
+                if (files.length > 0) {
+                    const document = await vscode.workspace.openTextDocument(files[0]);
+                    targetEditor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+                } else {
+                    vscode.window.showWarningMessage('No editor available to apply the fix. Please open a file first.');
                     return;
                 }
             }
             
-            // Apply the fix to the current editor
-            await applyFixToEditor(editor, vulnerability, fix);
+            // Apply the fix to the target editor
+            await applyFixToEditor(targetEditor, vulnerability, fix);
             
             acceptedCount++;
             updateAfterFix(vulnerability);
@@ -441,7 +455,9 @@ async function scanDocument(document: vscode.TextDocument) {
                     severity: vuln.severity,
                     recommendation: vuln.recommendation,
                     educationalContent: vuln.educationalContent,
-                    automaticFix: vuln.automaticFix
+                    automaticFix: vuln.automaticFix,
+                    // Include the file path for proper fix application
+                    file: document.fileName
                 }
             };
         });
