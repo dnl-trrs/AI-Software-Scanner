@@ -34,7 +34,8 @@ let currentRecommendations: any[] = [];
 let acceptedCount: number = 0;
 let filesScannedCount: number = 0;
 // Track line adjustments for each file after fixes are applied
-let lineAdjustments: Map<string, number[]> = new Map();
+// Store as array of {line: number, adjustment: number}
+let lineAdjustments: Map<string, Array<{line: number, adjustment: number}>> = new Map();
 
 // Track scanned files to prevent duplicate scans
 let scannedFiles = new Set<string>();
@@ -50,21 +51,39 @@ async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, f
         // Apply line adjustments from previous fixes in this file
         let adjustedLine = vulnerability.line;
         const fileAdjustments = lineAdjustments.get(fileName) || [];
-        for (const adjustment of fileAdjustments) {
-            if (adjustment < vulnerability.line) {
-                adjustedLine += adjustment;
+        
+        // Calculate cumulative adjustment for this line
+        for (const adj of fileAdjustments) {
+            // Only apply adjustments from fixes that occurred before this line
+            if (adj.line <= vulnerability.line) {
+                adjustedLine += adj.adjustment;
             }
         }
         
-        const startLine = adjustedLine - 1; // Convert to 0-based
+        // Ensure line number is within bounds
+        const startLine = Math.max(0, Math.min(adjustedLine - 1, editor.document.lineCount - 1)); // Convert to 0-based
         
         // Clean the fix string - remove explanatory comments and extract just the code
         let cleanedFix = extractActualCode(fix);
         
+        // Ensure the line exists before trying to read it
+        if (startLine >= editor.document.lineCount || startLine < 0) {
+            vscode.window.showErrorMessage(`Line ${adjustedLine} (adjusted from ${vulnerability.line}) is out of bounds. File has ${editor.document.lineCount} lines.`);
+            return;
+        }
+        
         // Get the original line and its indentation
-        const originalLine = editor.document.lineAt(startLine).text;
-        const originalIndentMatch = originalLine.match(/^(\s*)/);
-        const originalIndentation = originalIndentMatch ? originalIndentMatch[1] : '';
+        let originalLine: string;
+        let originalIndentation: string = '';
+        
+        try {
+            originalLine = editor.document.lineAt(startLine).text;
+            const originalIndentMatch = originalLine.match(/^(\s*)/);
+            originalIndentation = originalIndentMatch ? originalIndentMatch[1] : '';
+        } catch (error) {
+            vscode.window.showErrorMessage(`Cannot read line ${adjustedLine}: ${error}`);
+            return;
+        }
         
         // Determine how many lines to replace
         let linesToReplace = 1;
@@ -173,7 +192,10 @@ async function applyFixToEditor(editor: vscode.TextEditor, vulnerability: any, f
         if (!lineAdjustments.has(fileName)) {
             lineAdjustments.set(fileName, []);
         }
-        lineAdjustments.get(fileName)!.push(lineChange);
+        lineAdjustments.get(fileName)!.push({
+            line: vulnerability.line,
+            adjustment: lineChange
+        });
         
         // Update remaining recommendations with new line numbers
         updateRecommendationLineNumbers(fileName, vulnerability.line, lineChange);

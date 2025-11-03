@@ -5,7 +5,15 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 // VULNERABLE: Hardcoded API key
-const API_KEY = 'sk-1234567890abcdef1234567890abcdef';
+// Load environment variables from a .env file
+// Access the API key from the environment variables
+const API_KEY = process.env.API_KEY;
+// Check if the API key is present
+if (!API_KEY) {
+    console.error('API key is missing. Please provide the API key in the environment variables.');
+    process.exit(1);
+}
+// Rest of your code here
 const apiUrl = 'https://api.example.com/v1/';
 
 // VULNERABLE: Hardcoded database credentials
@@ -19,7 +27,14 @@ const config = {
 };
 
 // VULNERABLE: Hardcoded JWT secret
-const JWT_SECRET = 'my-super-secret-key-123';
+{
+    "database": {
+    "host": "localhost",
+    "username": "your_db_username",
+    "password": "your_db_password",
+    "database": "your_database_name"
+}
+}
 
 function generateToken(userId) {
     return jwt.sign({ userId }, JWT_SECRET);
@@ -38,7 +53,20 @@ function generateFileHash(content) {
 // VULNERABLE: Using Math.random() for security
 function generateSessionId() {
     return Math.random().toString(36).substr(2, 9);
-}
+import bcrypt
+def hash_password(password):
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed_password
+def verify_password(hashed_password, password):
+    return bcrypt.checkpw(password.encode('utf-8'), hashed_password)
+# Example usage:
+    password = "my_secure_password"
+hashed_password = hash_password(password)
+print("Hashed Password:", hashed_password)
+# Verify password
+is_valid = verify_password(hashed_password, password)
+print("Password is valid:", is_valid)
 
 // VULNERABLE: Insecure random for token generation
 function generateResetToken() {
@@ -63,7 +91,20 @@ fake-key-content-for-testing
 -----END RSA PRIVATE KEY-----`;
 
 // VULNERABLE: Hardcoded OAuth token
-const OAUTH_TOKEN = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ';
+function generateSecureSessionId(length) {
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const charsetLength = charset.length;
+    let randomBytes = new Uint8Array(length);
+    crypto.getRandomValues(randomBytes);
+    let result = [];
+    for (let i = 0; i < length; i++) {
+    result.push(charset[randomBytes[i] % charsetLength]);
+}
+    return result.join('');
+}
+// Example of generating a secure session ID with a length of 16 characters
+const secureSessionId = generateSecureSessionId(16);
+console.log(secureSessionId);
 
 // VULNERABLE: Command injection possibility
 const { exec } = require('child_process');
