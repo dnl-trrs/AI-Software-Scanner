@@ -246,34 +246,6 @@ export class RecommendationPanel {
                         gap: 12px;
                     }
 
-                    .severity-badge {
-                        padding: 4px 10px;
-                        border-radius: 12px;
-                        font-size: 11px;
-                        font-weight: bold;
-                        text-transform: uppercase;
-                        display: inline-block;
-                    }
-
-                    .severity-critical {
-                        background: #ff0000;
-                        color: white;
-                    }
-
-                    .severity-high {
-                        background: #ff8800;
-                        color: white;
-                    }
-
-                    .severity-medium {
-                        background: #ffcc00;
-                        color: black;
-                    }
-
-                    .severity-low {
-                        background: #0099ff;
-                        color: white;
-                    }
 
                     .modal-body {
                         padding: 24px;
@@ -469,7 +441,6 @@ export class RecommendationPanel {
                             Recommendation Action
                         </div>
                         <div class="navigation-controls">
-                            <span class="severity-badge severity-${recommendation.vulnerability?.severity || 'medium'}">${recommendation.vulnerability?.severity || 'medium'}</span>
                             <div class="nav-group">
                                 <button class="nav-button" id="prevBtn" ${isFirst ? 'disabled' : ''} title="Previous recommendation">
                                     ‹

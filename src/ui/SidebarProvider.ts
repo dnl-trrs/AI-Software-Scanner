@@ -240,18 +240,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         border-bottom: none;
                     }
                     
-                    .severity-indicator {
-                        display: inline-block;
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 50%;
-                        margin-right: 6px;
-                    }
-                    
-                    .severity-critical { background: #ff0000; }
-                    .severity-high { background: #ff8800; }
-                    .severity-medium { background: #ffcc00; }
-                    .severity-low { background: #0099ff; }
                 </style>
             </head>
             <body>
@@ -333,7 +321,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                 if (message.results && message.results.length > 0) {
                                     resultsList.innerHTML = message.results.map(item => 
                                         '<div class="scan-item">' +
-                                            '<span class="severity-indicator severity-' + item.severity + '"></span>' +
                                             '<strong>' + item.type + ':</strong> Line ' + item.line + ' - ' + item.message +
                                         '</div>'
                                     ).join('');
