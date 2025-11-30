@@ -790,7 +790,8 @@ function logScanResults(vulnerabilities: Vulnerability[], recommendations: any[]
     outputChannel.appendLine(`Found ${vulnerabilities.length} vulnerabilities\n`);
     
     vulnerabilities.forEach((vuln, index) => {
-        outputChannel.appendLine(`${index + 1}. [${vuln.severity.toUpperCase()}] ${vuln.type}`);
+        const severity = vuln.severity || 'medium';
+        outputChannel.appendLine(`${index + 1}. [${severity.toUpperCase()}] ${vuln.type}`);
         outputChannel.appendLine(`   Line ${vuln.line}: ${vuln.message}`);
         if (recommendations[index]) {
             outputChannel.appendLine(`   ⚡ Quick Fix Available (${recommendations[index].estimatedFixTime} min)`);

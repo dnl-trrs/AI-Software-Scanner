@@ -73,7 +73,8 @@ export class OpenAIClient {
                     return result.vulnerabilities.map((vuln: any) => ({
                         ...vuln,
                         line: parseInt(vuln.line) || 1,
-                        column: parseInt(vuln.column) || 1
+                        column: parseInt(vuln.column) || 1,
+                        severity: vuln.severity || 'medium'
                     }));
                 }
                 return result.vulnerabilities || [];
