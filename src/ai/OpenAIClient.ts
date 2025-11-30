@@ -38,7 +38,6 @@ export class OpenAIClient {
                             "vulnerabilities": [
                                 {
                                     "type": "vulnerability type (e.g., SQL Injection, XSS, etc.)",
-                                    "severity": "critical|high|medium|low",
                                     "line": line_number_integer,
                                     "description": "clear description of the issue",
                                     "fix": "suggested fix code or approach",
